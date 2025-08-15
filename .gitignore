@@ -1,0 +1,127 @@
+
+# Python
+
+__pycache__/
+
+*.py[cod]
+
+*$py.class
+
+*.so
+
+venv/
+
+env/
+
+.env
+
+*.env
+
+
+
+# Logs
+
+logs/
+
+*.log
+
+
+
+# Backups
+
+backups/
+
+*.backup
+
+*.bak
+
+
+
+# Node
+
+node_modules/
+
+npm-debug.log*
+
+yarn-debug.log*
+
+yarn-error.log*
+
+.pnp
+
+.pnp.js
+
+
+
+# Build outputs
+
+dist/
+
+build/
+
+*.egg-info/
+
+
+
+# IDE
+
+.vscode/
+
+.idea/
+
+*.swp
+
+*.swo
+
+*~
+
+.DS_Store
+
+
+
+# Security - DÔLEŽITÉ!
+
+*.pem
+
+*.key
+
+*.crt
+
+config.py
+
+secrets.py
+
+*.db
+
+*.sqlite
+
+
+
+# Test files
+
+test_*.py
+
+*_test.py
+
+
+
+# Scripts that might contain sensitive data
+
+setup-secure-admin.sh
+
+scripts/deploy.sh
+
+scripts/backup.sh
+
+
+
+# PM2
+
+ecosystem.config.js
+
+
+
+# MacOS
+
+.DS_Store
+
