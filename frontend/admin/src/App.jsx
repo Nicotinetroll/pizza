@@ -21,7 +21,7 @@ const MainApp = () => {
   return (
       <div className="admin-panel">
         <header>
-          <h1>🍕💉 AnabolicPizza Admin</h1>
+          <h1>🍕 Quatroformaggi</h1>
           <nav>
             <button
                 className={activeTab === 'dashboard' ? 'active' : ''}
