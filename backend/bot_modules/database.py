@@ -1,5 +1,5 @@
 """
-Database operations and models
+Enhanced database operations with categories and referral codes
 """
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
@@ -34,24 +34,99 @@ async def create_or_update_user(user_data: dict) -> dict:
                 "telegram_id": user_data["telegram_id"],
                 "total_orders": 0,
                 "total_spent_usdt": 0,
-                "status": "active"
+                "status": "active",
+                "referrals_used": []
             }
         },
         upsert=True
     )
     return result
 
+# Category Functions
+async def get_active_categories() -> List[dict]:
+    """Get all active categories sorted by order"""
+    return await db.categories.find(
+        {"is_active": True}
+    ).sort("order", 1).to_list(100)
+
+async def get_category_by_id(category_id: str) -> Optional[dict]:
+    """Get category by ID"""
+    try:
+        return await db.categories.find_one({"_id": ObjectId(category_id)})
+    except:
+        return None
+
+# Product Functions
+async def get_products_by_category(category_id: str, limit: int = 20) -> List[dict]:
+    """Get active products in a category"""
+    try:
+        return await db.products.find({
+            "category_id": ObjectId(category_id),
+            "is_active": True
+        }).limit(limit).to_list(limit)
+    except:
+        return []
+
 async def get_active_products(limit: int = 20) -> List[dict]:
     """Get active products from database"""
     return await db.products.find({"is_active": True}).limit(limit).to_list(limit)
 
 async def get_product_by_id(product_id: str) -> Optional[dict]:
-    """Get product by ID"""
+    """Get product by ID with category info"""
     try:
-        return await db.products.find_one({"_id": ObjectId(product_id)})
+        product = await db.products.find_one({"_id": ObjectId(product_id)})
+        if product and product.get("category_id"):
+            category = await db.categories.find_one({"_id": product["category_id"]})
+            if category:
+                product["category_name"] = category["name"]
+        return product
     except:
         return None
 
+# Referral Functions
+async def validate_referral_code(code: str) -> Optional[dict]:
+    """Validate and get referral code details"""
+    referral = await db.referral_codes.find_one({
+        "code": code.upper(),
+        "is_active": True
+    })
+    
+    if not referral:
+        return None
+    
+    # Check if expired
+    if referral.get("valid_until") and referral["valid_until"] < datetime.utcnow():
+        return None
+    
+    # Check if not yet valid
+    if referral.get("valid_from") and referral["valid_from"] > datetime.utcnow():
+        return None
+    
+    # Check usage limit
+    if referral.get("usage_limit") and referral.get("used_count", 0) >= referral["usage_limit"]:
+        return None
+    
+    return referral
+
+async def apply_referral_code(code: str) -> bool:
+    """Increment usage count for referral code"""
+    result = await db.referral_codes.update_one(
+        {"code": code.upper()},
+        {"$inc": {"used_count": 1}}
+    )
+    return result.modified_count > 0
+
+async def calculate_discount(total: float, referral: dict) -> tuple[float, float]:
+    """Calculate discount amount and new total"""
+    if referral["discount_type"] == "percentage":
+        discount = total * (referral["discount_value"] / 100)
+    else:  # fixed
+        discount = min(referral["discount_value"], total)
+    
+    new_total = max(0, total - discount)
+    return discount, new_total
+
+# Order Functions
 async def get_user_orders(telegram_id: int, limit: int = 10) -> List[dict]:
     """Get user orders"""
     return await db.orders.find(
@@ -59,10 +134,23 @@ async def get_user_orders(telegram_id: int, limit: int = 10) -> List[dict]:
     ).sort("created_at", -1).limit(limit).to_list(limit)
 
 async def create_order(order_data: dict) -> str:
-    """Create new order"""
+    """Create new order with referral support"""
     order_data["created_at"] = datetime.utcnow()
     order_data["order_number"] = await generate_order_number()
+    
+    # Store original total if discount applied
+    if order_data.get("referral_code"):
+        order_data["original_total"] = order_data.get("total_usdt", 0) + order_data.get("discount_amount", 0)
+    
     result = await db.orders.insert_one(order_data)
+    
+    # Update user's referral usage
+    if order_data.get("referral_code"):
+        await db.users.update_one(
+            {"telegram_id": order_data["telegram_id"]},
+            {"$push": {"referrals_used": order_data["referral_code"]}}
+        )
+    
     return str(result.inserted_id)
 
 async def update_order_payment(order_id: str, payment_data: dict) -> bool:
@@ -80,15 +168,28 @@ async def update_order_payment(order_id: str, payment_data: dict) -> bool:
             }
         )
         
-        # Update product sold counts
+        # Update product sold counts and user stats
         if result.modified_count > 0:
             order = await db.orders.find_one({"_id": ObjectId(order_id)})
-            if order and order.get("items"):
-                for item in order["items"]:
-                    await db.products.update_one(
-                        {"name": item["product_name"]},
-                        {"$inc": {"sold_count": item.get("quantity", 1)}}
-                    )
+            if order:
+                # Update products
+                if order.get("items"):
+                    for item in order["items"]:
+                        await db.products.update_one(
+                            {"name": item["product_name"]},
+                            {"$inc": {"sold_count": item.get("quantity", 1)}}
+                        )
+                
+                # Update user stats
+                await db.users.update_one(
+                    {"telegram_id": order["telegram_id"]},
+                    {
+                        "$inc": {
+                            "total_orders": 1,
+                            "total_spent_usdt": order.get("total_usdt", 0)
+                        }
+                    }
+                )
         
         return result.modified_count > 0
     except Exception as e:
@@ -101,3 +202,16 @@ async def get_order_by_id(order_id: str) -> Optional[dict]:
         return await db.orders.find_one({"_id": ObjectId(order_id)})
     except:
         return None
+
+# Stats Functions
+async def get_user_stats(telegram_id: int) -> dict:
+    """Get user statistics"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return {"total_orders": 0, "total_spent": 0}
+    
+    return {
+        "total_orders": user.get("total_orders", 0),
+        "total_spent": user.get("total_spent_usdt", 0),
+        "member_since": user.get("created_at", datetime.utcnow())
+    }

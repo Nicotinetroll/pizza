@@ -1,30 +1,30 @@
 """
-Bot command and callback handlers
+Enhanced bot command and message handlers with better UX
 """
 import asyncio
-import secrets
-from datetime import datetime
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bson import ObjectId
 
 from .config import MESSAGES
 from .database import (
-    create_or_update_user, get_active_products, get_product_by_id,
-    get_user_orders, create_order, update_order_payment, get_order_by_id
+    create_or_update_user, get_active_categories, get_products_by_category,
+    get_product_by_id, get_user_orders, get_user_stats,
+    validate_referral_code, calculate_discount
 )
 from .keyboards import (
-    get_main_menu_keyboard, get_products_keyboard, get_product_detail_keyboard,
-    get_cart_keyboard, get_countries_keyboard, get_payment_keyboard,
-    get_payment_simulation_keyboard
+    get_main_menu_keyboard, get_categories_keyboard, get_products_keyboard,
+    get_product_detail_keyboard, get_cart_keyboard, get_checkout_confirm_keyboard,
+    get_referral_keyboard, get_back_keyboard, get_order_complete_keyboard
 )
 from .cart_manager import cart_manager
 
-# User states storage
+# User states storage for conversation flow
 user_states = {}
+user_context = {}  # Store category context
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command"""
+    """Handle /start command with warm welcome"""
     user = update.effective_user
     
     # Save user to database
@@ -35,146 +35,299 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "last_name": user.last_name
     })
     
-    welcome_text = MESSAGES["welcome"].format(name=user.first_name)
+    # Get user stats for personalized greeting
+    stats = await get_user_stats(user.id)
+    
+    welcome_text = MESSAGES["welcome"].format(name=user.first_name or "Bro")
+    
+    # Add returning customer message
+    if stats["total_orders"] > 0:
+        welcome_text += f"\n\n🎉 *Welcome back!* You've made {stats['total_orders']} orders with us!"
+    
     keyboard = get_main_menu_keyboard()
     
     if update.message:
-        await update.message.reply_text(welcome_text, reply_markup=keyboard)
+        await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
     elif update.callback_query:
-        await update.callback_query.edit_message_text(welcome_text, reply_markup=keyboard)
+        await update.callback_query.edit_message_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /shop command"""
-    await show_products(update, context)
+    """Handle /shop command - show categories"""
+    await show_categories(update, context)
 
-async def cart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /cart command"""
-    await show_cart(update, context)
-
-async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /orders command"""
-    user_id = update.effective_user.id
-    orders = await get_user_orders(user_id, limit=10)
+async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show product categories"""
+    categories = await get_active_categories()
     
-    if not orders:
-        text = "No orders yet bro! 📦\n\nTime to change that 💪 Hit /shop"
+    if not categories:
+        text = MESSAGES["no_categories"]
+        keyboard = get_back_keyboard()
     else:
-        text = "📦 *YOUR ORDER HISTORY*\n" + "="*20 + "\n\n"
-        for order in orders:
-            status_emoji = {"pending": "⏳", "paid": "💰", "completed": "✅", "cancelled": "❌"}.get(order['status'], "❓")
-            text += (
-                f"{status_emoji} `{order['order_number']}`\n"
-                f"   {order['created_at'].strftime('%d.%m.%Y')}\n"
-                f"   ${order['total_usdt']:.2f} • {order['status']}\n\n"
-            )
-    
-    await update.message.reply_text(text, parse_mode='Markdown')
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command"""
-    await update.message.reply_text(MESSAGES["help"], parse_mode='Markdown')
-
-async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show products list"""
-    products = await get_active_products()
-    
-    if not products:
-        text = "Damn, we're out! 😔\n\nChef's restocking. Check back soon!"
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text)
-        else:
-            await update.message.reply_text(text)
-        return
-    
-    text = "🍕 *THE MENU*\n\nWhat you running? Pick your cycle:"
-    keyboard = get_products_keyboard(products)
+        text = MESSAGES["shop_categories"]
+        keyboard = get_categories_keyboard(categories)
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        except:
+            await update.callback_query.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
     else:
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
-async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show shopping cart"""
+async def show_category_products(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str):
+    """Show products in a category"""
+    query = update.callback_query
     user_id = update.effective_user.id
-    cart = cart_manager.get_cart(user_id)
     
-    if not cart:
-        text = MESSAGES["cart_empty"]
-        keyboard = [[InlineKeyboardButton("🍕 Feed Them", callback_data="shop")]]
-        
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
-            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-        return
+    # Store category context
+    user_context[user_id] = {"category_id": category_id}
     
-    cart_text = "🛒 *YOUR CART*\n" + "="*20 + "\n\n"
-    total = 0
+    products = await get_products_by_category(category_id)
     
-    for product_id, item in cart.items():
-        subtotal = item['price'] * item['quantity']
-        total += subtotal
-        cart_text += f"🍕 {item['name']}\n   {item['quantity']}x ${item['price']:.2f} = ${subtotal:.2f}\n\n"
-    
-    cart_text += "="*20 + f"\n💰 *TOTAL: ${total:.2f} USDT*"
-    keyboard = get_cart_keyboard()
-    
-    if update.callback_query:
-        await update.callback_query.edit_message_text(cart_text, reply_markup=keyboard, parse_mode='Markdown')
+    if not products:
+        text = MESSAGES["category_empty"]
+        keyboard = get_back_keyboard("shop")
     else:
-        await update.message.reply_text(cart_text, reply_markup=keyboard, parse_mode='Markdown')
+        # Get category name for display
+        from .database import get_category_by_id
+        category = await get_category_by_id(category_id)
+        
+        text = f"{category.get('emoji', '📦')} *{category['name']}*\n\n"
+        text += f"_{category.get('description', 'Premium products for serious athletes')}_\n\n"
+        text += "Select a product to see details:"
+        
+        keyboard = get_products_keyboard(products, category_id)
+    
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, product_id: str):
-    """Show product detail with quantity selector"""
+    """Show detailed product view with simplified quantity selector"""
     query = update.callback_query
     user_id = update.effective_user.id
     
     product = await get_product_by_id(product_id)
     if not product:
-        await query.edit_message_text("Product not found! 🤷")
+        await query.edit_message_text("Product not found! 🤷", reply_markup=get_back_keyboard("shop"))
         return
     
+    # Get current quantity selection (default 1)
     quantity = cart_manager.get_quantity(user_id, product_id)
-    total_price = product['price_usdt'] * quantity
     
-    text = (
-        f"*{product['name']}*\n\n"
-        f"_{product['description']}_\n\n"
-        f"💰 *${product['price_usdt']:.2f} per unit*\n"
-        f"📦 *Total: ${total_price:.2f} for {quantity} units*"
-    )
+    # Check if already in cart
+    cart = cart_manager.get_cart(user_id)
+    in_cart = cart.get(product_id, {}).get('quantity', 0)
     
-    keyboard = get_product_detail_keyboard(product_id, quantity, total_price)
+    # Build detailed product text
+    text = f"🏷️ *{product['name']}*\n\n"
+    text += f"📝 _{product['description']}_\n\n"
+    
+    # Add product details
+    text += f"💰 *Price:* ${product['price_usdt']:.2f} per unit\n"
+    
+    if quantity > 1:
+        text += f"📦 *Selected:* {quantity} units = ${product['price_usdt'] * quantity:.2f}\n"
+    
+    if in_cart > 0:
+        text += f"\n✅ *Already in cart:* {in_cart} units\n"
+    
+    # Add stock info
+    stock = product.get('stock_quantity', 999)
+    if stock < 10:
+        text += f"\n⚠️ *Only {stock} left in stock!*\n"
+    
+    # Add motivational text
+    text += "\n💪 _Ready to level up your gains?_"
+    
+    keyboard = get_product_detail_keyboard(product_id, quantity, in_cart)
     
     try:
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
     except:
         pass  # Ignore if message is identical
 
+async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show shopping cart with better formatting"""
+    user_id = update.effective_user.id
+    cart = cart_manager.get_cart(user_id)
+    
+    if not cart:
+        text = MESSAGES["cart_empty"]
+        keyboard = get_cart_keyboard(has_items=False)
+    else:
+        text = "🛒 *YOUR SHOPPING CART*\n" + "="*25 + "\n\n"
+        total = 0
+        
+        for product_id, item in cart.items():
+            subtotal = item['price'] * item['quantity']
+            total += subtotal
+            text += f"📦 *{item['name']}*\n"
+            text += f"   {item['quantity']} units × ${item['price']:.2f} = *${subtotal:.2f}*\n\n"
+        
+        text += "="*25 + "\n"
+        text += f"💰 *TOTAL: ${total:.2f} USDT*\n\n"
+        text += "Ready to checkout? 🚀"
+        
+        keyboard = get_cart_keyboard(has_items=True)
+    
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        except:
+            await update.callback_query.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+
+async def cart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cart command"""
+    await show_cart(update, context)
+
+async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /orders command with better formatting"""
+    user_id = update.effective_user.id
+    orders = await get_user_orders(user_id, limit=10)
+    stats = await get_user_stats(user_id)
+    
+    if not orders:
+        text = "📦 *No orders yet!*\n\n"
+        text += "Time to change that! Your muscles are waiting! 💪\n\n"
+        text += "Hit /shop to browse our premium selection!"
+    else:
+        text = "📦 *YOUR ORDER HISTORY*\n" + "="*25 + "\n\n"
+        
+        # Add stats
+        text += f"📊 *Lifetime Stats:*\n"
+        text += f"• Total Orders: {stats['total_orders']}\n"
+        text += f"• Total Spent: ${stats['total_spent']:.2f}\n"
+        text += f"• Member Since: {stats['member_since'].strftime('%B %Y')}\n\n"
+        
+        text += "="*25 + "\n*Recent Orders:*\n\n"
+        
+        for order in orders:
+            status_emoji = {
+                "pending": "⏳", 
+                "paid": "💰", 
+                "processing": "📦",
+                "completed": "✅", 
+                "cancelled": "❌"
+            }.get(order['status'], "❓")
+            
+            text += f"{status_emoji} `{order['order_number']}`\n"
+            text += f"   📅 {order['created_at'].strftime('%d %b %Y')}\n"
+            text += f"   💵 ${order['total_usdt']:.2f} • {order['status'].upper()}\n\n"
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🍕 Order More", callback_data="shop")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+    ])
+    
+    await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command"""
+    keyboard = get_main_menu_keyboard()
+    
+    if update.message:
+        await update.message.reply_text(MESSAGES["help"], parse_mode='Markdown', reply_markup=keyboard)
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(MESSAGES["help"], parse_mode='Markdown', reply_markup=keyboard)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages (city input)"""
+    """Handle text messages based on user state"""
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
+    state = user_states.get(user_id)
+    
+    if state == "waiting_city":
+        await handle_city_input(update, context, text)
+    elif state == "waiting_referral":
+        await handle_referral_input(update, context, text)
+    else:
+        # Default response for unexpected messages
+        await update.message.reply_text(
+            "Hey! Not sure what you mean... 🤔\n\n"
+            "Use the menu buttons or try these commands:\n"
+            "• /shop - Browse products\n"
+            "• /cart - View your cart\n"
+            "• /orders - See your orders\n"
+            "• /help - Get help",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str):
+    """Handle city input during checkout"""
     user_id = update.effective_user.id
     
-    if user_states.get(user_id) == "waiting_city":
-        city = update.message.text.strip()
+    if len(city) < 2:
+        await update.message.reply_text(
+            "❌ That doesn't look like a real city name!\n\n"
+            "Please enter a valid city name (minimum 2 characters):"
+        )
+        return
+    
+    # Validate city doesn't contain suspicious characters
+    if any(char in city for char in ['<', '>', '/', '\\', '@', '#']):
+        await update.message.reply_text(
+            "❌ Please enter a valid city name without special characters:"
+        )
+        return
+    
+    context.user_data['delivery_city'] = city
+    user_states[user_id] = "waiting_referral"
+    
+    # Ask for referral code
+    country = context.user_data.get('delivery_country', 'Unknown')
+    
+    await update.message.reply_text(
+        f"✅ *Great!* Shipping to: {city}, {country}\n\n" + 
+        MESSAGES["ask_referral"],
+        reply_markup=get_referral_keyboard(),
+        parse_mode='Markdown'
+    )
+
+async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str):
+    """Handle referral code input"""
+    user_id = update.effective_user.id
+    
+    # Validate referral code
+    referral = await validate_referral_code(code)
+    
+    if referral:
+        # Calculate discount
+        total = context.user_data.get('checkout_total', 0)
+        discount_amount, new_total = await calculate_discount(total, referral)
         
-        if len(city) < 2:
-            await update.message.reply_text("Come on, type a real city name! 🙄")
-            return
+        # Store in context
+        context.user_data['referral_code'] = code.upper()
+        context.user_data['discount_amount'] = discount_amount
+        context.user_data['final_total'] = new_total
         
-        context.user_data['delivery_city'] = city
-        user_states[user_id] = None
+        # Show success message
+        discount_text = f"{referral['discount_value']}%"
+        if referral['discount_type'] == 'fixed':
+            discount_text = f"${referral['discount_value']:.2f}"
         
+        text = MESSAGES["referral_applied"].format(
+            code=code.upper(),
+            discount_text=discount_text,
+            original=total,
+            discount_amount=discount_amount,
+            new_total=new_total
+        )
+        
+        from .keyboards import get_payment_keyboard
         keyboard = get_payment_keyboard()
-        country = context.user_data.get('delivery_country', 'Unknown')
         
         await update.message.reply_text(
-            f"📍 *Delivery to:*\n{city}, {country}\n\n"
-            "💳 *How you paying?*\n"
-            "(All anonymous, all secure)",
+            text + "\n\n" + MESSAGES["payment_select"],
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
-
-# Continue in next file...
+    else:
+        # Invalid code
+        await update.message.reply_text(
+            MESSAGES["referral_invalid"],
+            reply_markup=get_referral_keyboard(),
+            parse_mode='Markdown'
+        )
+    
+    user_states[user_id] = None
