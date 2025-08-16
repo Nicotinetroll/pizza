@@ -366,7 +366,7 @@ const Categories = () => {
                 <Plus size={24} />
             </button>
 
-            <style jsx>{`
+            <style>{`
                 .categories-list {
                     display: grid;
                     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -543,15 +543,15 @@ const Categories = () => {
                     .categories-list {
                         grid-template-columns: 1fr;
                     }
-
+                    
                     .emoji-picker {
                         grid-template-columns: repeat(4, 1fr);
                     }
-
+                    
                     .category-actions {
                         flex-direction: column;
                     }
-
+                    
                     .category-actions button {
                         width: 100%;
                     }
@@ -561,13 +561,13 @@ const Categories = () => {
                     .category-header {
                         flex-wrap: wrap;
                     }
-
+                    
                     .category-order {
                         position: absolute;
                         top: 24px;
                         right: 24px;
                     }
-
+                    
                     .form-row {
                         grid-template-columns: 1fr;
                     }

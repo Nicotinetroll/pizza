@@ -296,7 +296,7 @@ const Orders = () => {
             </div>
         )}
 
-        <style jsx>{`
+        <style>{`
         .orders-list {
           display: flex;
           flex-direction: column;
