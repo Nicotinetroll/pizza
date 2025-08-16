@@ -1,5 +1,5 @@
 """
-Enhanced database operations with categories and referral codes
+Enhanced database operations with categories, referral codes and VIP support
 """
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
@@ -35,12 +35,41 @@ async def create_or_update_user(user_data: dict) -> dict:
                 "total_orders": 0,
                 "total_spent_usdt": 0,
                 "status": "active",
-                "referrals_used": []
+                "referrals_used": [],
+                "is_vip": False,
+                "vip_discount_percentage": 0
             }
         },
         upsert=True
     )
     return result
+
+async def get_user_vip_status(telegram_id: int) -> dict:
+    """Get user VIP status and discount"""
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    if not user:
+        return {"is_vip": False, "discount": 0}
+    
+    # Check if VIP expired
+    if user.get("vip_expires") and user["vip_expires"] < datetime.utcnow():
+        # VIP expired, update status
+        await db.users.update_one(
+            {"telegram_id": telegram_id},
+            {"$set": {"is_vip": False}}
+        )
+        return {"is_vip": False, "discount": 0}
+    
+    return {
+        "is_vip": user.get("is_vip", False),
+        "discount": user.get("vip_discount_percentage", 0)
+    }
+
+async def calculate_vip_price(original_price: float, vip_discount: float) -> float:
+    """Calculate price with VIP discount"""
+    if vip_discount <= 0:
+        return original_price
+    discount_amount = original_price * (vip_discount / 100)
+    return max(0, original_price - discount_amount)
 
 # Category Functions
 async def get_active_categories() -> List[dict]:
@@ -57,28 +86,64 @@ async def get_category_by_id(category_id: str) -> Optional[dict]:
         return None
 
 # Product Functions
-async def get_products_by_category(category_id: str, limit: int = 20) -> List[dict]:
-    """Get active products in a category"""
+async def get_products_by_category(category_id: str, limit: int = 20, vip_discount: float = 0) -> List[dict]:
+    """Get active products in a category with VIP pricing"""
     try:
-        return await db.products.find({
+        products = await db.products.find({
             "category_id": ObjectId(category_id),
             "is_active": True
         }).limit(limit).to_list(limit)
+        
+        # Apply VIP discount to prices
+        for product in products:
+            original_price = float(product.get("price_usdt", 0))
+            if vip_discount > 0:
+                product["original_price"] = original_price
+                product["price_usdt"] = await calculate_vip_price(original_price, vip_discount)
+                product["has_vip_discount"] = True
+            else:
+                product["has_vip_discount"] = False
+                
+        return products
     except:
         return []
 
-async def get_active_products(limit: int = 20) -> List[dict]:
-    """Get active products from database"""
-    return await db.products.find({"is_active": True}).limit(limit).to_list(limit)
+async def get_active_products(limit: int = 20, vip_discount: float = 0) -> List[dict]:
+    """Get active products from database with VIP pricing"""
+    products = await db.products.find({"is_active": True}).limit(limit).to_list(limit)
+    
+    # Apply VIP discount to prices
+    for product in products:
+        original_price = float(product.get("price_usdt", 0))
+        if vip_discount > 0:
+            product["original_price"] = original_price
+            product["price_usdt"] = await calculate_vip_price(original_price, vip_discount)
+            product["has_vip_discount"] = True
+        else:
+            product["has_vip_discount"] = False
+            
+    return products
 
-async def get_product_by_id(product_id: str) -> Optional[dict]:
-    """Get product by ID with category info"""
+async def get_product_by_id(product_id: str, vip_discount: float = 0) -> Optional[dict]:
+    """Get product by ID with category info and VIP pricing"""
     try:
         product = await db.products.find_one({"_id": ObjectId(product_id)})
-        if product and product.get("category_id"):
-            category = await db.categories.find_one({"_id": product["category_id"]})
-            if category:
-                product["category_name"] = category["name"]
+        if product:
+            # Get category info
+            if product.get("category_id"):
+                category = await db.categories.find_one({"_id": product["category_id"]})
+                if category:
+                    product["category_name"] = category["name"]
+            
+            # Apply VIP discount
+            original_price = float(product.get("price_usdt", 0))
+            if vip_discount > 0:
+                product["original_price"] = original_price
+                product["price_usdt"] = await calculate_vip_price(original_price, vip_discount)
+                product["has_vip_discount"] = True
+            else:
+                product["has_vip_discount"] = False
+                
         return product
     except:
         return None
@@ -134,13 +199,15 @@ async def get_user_orders(telegram_id: int, limit: int = 10) -> List[dict]:
     ).sort("created_at", -1).limit(limit).to_list(limit)
 
 async def create_order(order_data: dict) -> str:
-    """Create new order with referral support"""
+    """Create new order with referral and VIP support"""
     order_data["created_at"] = datetime.utcnow()
     order_data["order_number"] = await generate_order_number()
     
     # Store original total if discount applied
-    if order_data.get("referral_code"):
-        order_data["original_total"] = order_data.get("total_usdt", 0) + order_data.get("discount_amount", 0)
+    if order_data.get("referral_code") or order_data.get("vip_discount_applied"):
+        original_total = order_data.get("total_usdt", 0)
+        if order_data.get("discount_amount", 0) > 0:
+            order_data["original_total"] = original_total + order_data["discount_amount"]
     
     result = await db.orders.insert_one(order_data)
     
@@ -213,5 +280,7 @@ async def get_user_stats(telegram_id: int) -> dict:
     return {
         "total_orders": user.get("total_orders", 0),
         "total_spent": user.get("total_spent_usdt", 0),
-        "member_since": user.get("created_at", datetime.utcnow())
+        "member_since": user.get("created_at", datetime.utcnow()),
+        "is_vip": user.get("is_vip", False),
+        "vip_discount": user.get("vip_discount_percentage", 0)
     }

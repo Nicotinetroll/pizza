@@ -15,7 +15,7 @@ import logging
 # Load environment variables
 load_dotenv('/opt/telegram-shop-bot/.env')
 
-app = FastAPI(title="AnabolicPizza API - Enhanced")
+app = FastAPI(title="AnabolicPizza API - Enhanced with VIP")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,6 +75,12 @@ class OrderStatusModel(BaseModel):
     status: str
     notes: Optional[str] = None
 
+class VIPUpdateModel(BaseModel):
+    is_vip: bool
+    vip_discount_percentage: float = 0
+    vip_expires: Optional[datetime] = None
+    vip_notes: Optional[str] = None
+
 # Helper functions
 def format_price(value):
     """Format price to 2 decimal places"""
@@ -112,7 +118,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 # Routes
 @app.get("/")
 async def root():
-    return {"status": "AnabolicPizza API", "version": "2.0", "features": ["categories", "referrals"]}
+    return {"status": "AnabolicPizza API", "version": "3.0", "features": ["categories", "referrals", "vip"]}
 
 @app.post("/api/auth/login")
 async def login(login_data: LoginModel):
@@ -389,10 +395,14 @@ async def update_order_status(order_id: str, status_update: OrderStatusModel, em
         logger.error(f"Error updating order status: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-# USER ENDPOINTS
+# USER ENDPOINTS WITH VIP
 @app.get("/api/users")
-async def get_users(skip: int = 0, limit: int = 100):
-    users = await db.users.find({}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+async def get_users(skip: int = 0, limit: int = 100, vip_only: bool = False):
+    query = {}
+    if vip_only:
+        query["is_vip"] = True
+    
+    users = await db.users.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     
     for user in users:
         user["_id"] = str(user["_id"])
@@ -422,9 +432,99 @@ async def get_users(skip: int = 0, limit: int = 100):
         
         # Get referrals used
         user["referrals_used"] = user.get("referrals_used", [])
+        
+        # VIP info
+        user["is_vip"] = user.get("is_vip", False)
+        user["vip_discount_percentage"] = user.get("vip_discount_percentage", 0)
+        
+        # Check if VIP expired
+        if user.get("vip_expires") and user["vip_expires"] < datetime.utcnow():
+            user["vip_status"] = "expired"
+        elif user.get("is_vip"):
+            user["vip_status"] = "active"
+        else:
+            user["vip_status"] = "none"
     
-    total = await db.users.count_documents({})
+    total = await db.users.count_documents(query)
     return {"users": users, "total": total}
+
+# VIP MANAGEMENT ENDPOINTS
+@app.patch("/api/users/{user_id}/vip")
+async def update_user_vip_status(user_id: str, vip_data: VIPUpdateModel, email: str = Depends(verify_token)):
+    try:
+        # Validate discount percentage
+        if vip_data.vip_discount_percentage < 0 or vip_data.vip_discount_percentage > 100:
+            raise HTTPException(status_code=400, detail="Discount must be between 0 and 100")
+        
+        user = await db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        update_data = {
+            "is_vip": vip_data.is_vip,
+            "vip_discount_percentage": vip_data.vip_discount_percentage,
+            "updated_at": datetime.utcnow()
+        }
+        
+        # Set VIP since date if enabling VIP
+        if vip_data.is_vip and not user.get("is_vip"):
+            update_data["vip_since"] = datetime.utcnow()
+        
+        # Handle expiration
+        if vip_data.vip_expires:
+            update_data["vip_expires"] = vip_data.vip_expires
+        else:
+            update_data["vip_expires"] = None
+            
+        if vip_data.vip_notes is not None:
+            update_data["vip_notes"] = vip_data.vip_notes
+        
+        # Update user
+        result = await db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": update_data}
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=400, detail="Failed to update VIP status")
+        
+        # Log the action
+        await db.audit_logs.insert_one({
+            "admin_id": email,
+            "action": "UPDATE_VIP_STATUS",
+            "entity_type": "user",
+            "entity_id": ObjectId(user_id),
+            "old_value": {
+                "is_vip": user.get("is_vip", False),
+                "vip_discount_percentage": user.get("vip_discount_percentage", 0)
+            },
+            "new_value": {
+                "is_vip": vip_data.is_vip,
+                "vip_discount_percentage": vip_data.vip_discount_percentage
+            },
+            "timestamp": datetime.utcnow()
+        })
+        
+        return {"success": True, "message": "VIP status updated"}
+    except Exception as e:
+        logger.error(f"Error updating VIP status: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/users/vip")
+async def get_vip_users(email: str = Depends(verify_token)):
+    vip_users = await db.users.find({
+        "is_vip": True,
+        "$or": [
+            {"vip_expires": None},
+            {"vip_expires": {"$gt": datetime.utcnow()}}
+        ]
+    }).to_list(100)
+    
+    for user in vip_users:
+        user["_id"] = str(user["_id"])
+        user["vip_discount_percentage"] = user.get("vip_discount_percentage", 0)
+    
+    return {"vip_users": vip_users, "total": len(vip_users)}
 
 # DASHBOARD STATS
 @app.get("/api/dashboard/stats")
@@ -445,6 +545,15 @@ async def get_stats():
     # Get active referral codes
     active_referrals = await db.referral_codes.count_documents({"is_active": True})
     
+    # Get VIP users count
+    vip_users = await db.users.count_documents({
+        "is_vip": True,
+        "$or": [
+            {"vip_expires": None},
+            {"vip_expires": {"$gt": datetime.utcnow()}}
+        ]
+    })
+    
     return {
         "stats": {
             "total_orders": total_orders,
@@ -452,7 +561,8 @@ async def get_stats():
             "total_users": total_users,
             "total_products": total_products,
             "total_categories": total_categories,
-            "active_referrals": active_referrals
+            "active_referrals": active_referrals,
+            "vip_users": vip_users
         }
     }
 

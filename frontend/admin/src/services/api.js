@@ -237,6 +237,20 @@ export const usersAPI = {
   getAll: async () => {
     const response = await api.get('/users');
     return response.data;
+  },
+
+  updateVIPStatus: async (userId, vipData) => {
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid user ID');
+    }
+
+    // Validate VIP data
+    if (vipData.vip_discount_percentage < 0 || vipData.vip_discount_percentage > 100) {
+      throw new Error('Discount must be between 0 and 100');
+    }
+
+    const response = await api.patch(`/users/${userId}/vip`, vipData);
+    return response.data;
   }
 };
 

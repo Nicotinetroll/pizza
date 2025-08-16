@@ -1,5 +1,5 @@
 """
-Enhanced bot command and message handlers with better UX
+Enhanced bot command and message handlers with better UX and VIP support
 """
 import asyncio
 from telegram import Update, InlineKeyboardMarkup
@@ -10,7 +10,7 @@ from .config import MESSAGES
 from .database import (
     create_or_update_user, get_active_categories, get_products_by_category,
     get_product_by_id, get_user_orders, get_user_stats,
-    validate_referral_code, calculate_discount
+    validate_referral_code, calculate_discount, get_user_vip_status
 )
 from .keyboards import (
     get_main_menu_keyboard, get_categories_keyboard, get_products_keyboard,
@@ -35,14 +35,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "last_name": user.last_name
     })
     
-    # Get user stats for personalized greeting
+    # Get user stats and VIP status
     stats = await get_user_stats(user.id)
+    vip_status = await get_user_vip_status(user.id)
     
     welcome_text = MESSAGES["welcome"].format(name=user.first_name or "Bro")
     
     # Add returning customer message
     if stats["total_orders"] > 0:
-        welcome_text += f"\n\n🎉 *Welcome back!* You've made {stats['total_orders']} orders with us!"
+        welcome_text += f"\n🎉 *Welcome back!* Orders: {stats['total_orders']}"
+    
+    # Add VIP status
+    if vip_status["is_vip"]:
+        welcome_text += f"\n👑 *VIP Member* - {vip_status['discount']}% OFF on everything!"
     
     keyboard = get_main_menu_keyboard()
     
@@ -82,7 +87,10 @@ async def show_category_products(update: Update, context: ContextTypes.DEFAULT_T
     # Store category context
     user_context[user_id] = {"category_id": category_id}
     
-    products = await get_products_by_category(category_id)
+    # Get VIP status for pricing
+    vip_status = await get_user_vip_status(user_id)
+    
+    products = await get_products_by_category(category_id, vip_discount=vip_status["discount"])
     
     if not products:
         text = MESSAGES["category_empty"]
@@ -92,9 +100,13 @@ async def show_category_products(update: Update, context: ContextTypes.DEFAULT_T
         from .database import get_category_by_id
         category = await get_category_by_id(category_id)
         
-        text = f"{category.get('emoji', '📦')} *{category['name']}*\n\n"
-        text += f"_{category.get('description', 'Premium products for serious athletes')}_\n\n"
-        text += "Select a product to see details:"
+        text = f"{category.get('emoji', '📦')} *{category['name']}*\n"
+        text += f"_{category.get('description', 'Premium products')}_"
+        
+        if vip_status["is_vip"]:
+            text += f"\n👑 *VIP {vip_status['discount']}% OFF*"
+        
+        text += "\n\nSelect product:"
         
         keyboard = get_products_keyboard(products, category_id)
     
@@ -105,7 +117,10 @@ async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     user_id = update.effective_user.id
     
-    product = await get_product_by_id(product_id)
+    # Get VIP status
+    vip_status = await get_user_vip_status(user_id)
+    
+    product = await get_product_by_id(product_id, vip_discount=vip_status["discount"])
     if not product:
         await query.edit_message_text("Product not found! 🤷", reply_markup=get_back_keyboard("shop"))
         return
@@ -117,26 +132,27 @@ async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     cart = cart_manager.get_cart(user_id)
     in_cart = cart.get(product_id, {}).get('quantity', 0)
     
-    # Build detailed product text
-    text = f"🏷️ *{product['name']}*\n\n"
-    text += f"📝 _{product['description']}_\n\n"
+    # Build detailed product text (compact version)
+    text = f"🏷️ *{product['name']}*\n"
+    text += f"_{product['description']}_\n\n"
     
-    # Add product details
-    text += f"💰 *Price:* ${product['price_usdt']:.2f} per unit\n"
+    # Show price with VIP discount if applicable
+    if product.get("has_vip_discount"):
+        text += f"💰 *Price:* ~${product['original_price']:.2f}~ ${product['price_usdt']:.2f}\n"
+        text += f"👑 *VIP {vip_status['discount']}% OFF!*\n"
+    else:
+        text += f"💰 *Price:* ${product['price_usdt']:.2f}\n"
     
     if quantity > 1:
-        text += f"📦 *Selected:* {quantity} units = ${product['price_usdt'] * quantity:.2f}\n"
+        text += f"📦 *Qty:* {quantity} = ${product['price_usdt'] * quantity:.2f}\n"
     
     if in_cart > 0:
-        text += f"\n✅ *Already in cart:* {in_cart} units\n"
+        text += f"✅ *In cart:* {in_cart}\n"
     
     # Add stock info
     stock = product.get('stock_quantity', 999)
     if stock < 10:
-        text += f"\n⚠️ *Only {stock} left in stock!*\n"
-    
-    # Add motivational text
-    text += "\n💪 _Ready to level up your gains?_"
+        text += f"⚠️ *Only {stock} left!*\n"
     
     keyboard = get_product_detail_keyboard(product_id, quantity, in_cart)
     
@@ -150,22 +166,31 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     cart = cart_manager.get_cart(user_id)
     
+    # Get VIP status
+    vip_status = await get_user_vip_status(user_id)
+    
     if not cart:
         text = MESSAGES["cart_empty"]
         keyboard = get_cart_keyboard(has_items=False)
     else:
-        text = "🛒 *YOUR SHOPPING CART*\n" + "="*25 + "\n\n"
+        text = "🛒 *YOUR CART*\n"
         total = 0
         
         for product_id, item in cart.items():
-            subtotal = item['price'] * item['quantity']
+            # Apply VIP discount to cart items
+            price = item['price']
+            if vip_status["is_vip"]:
+                from .database import calculate_vip_price
+                price = await calculate_vip_price(price, vip_status["discount"])
+            
+            subtotal = price * item['quantity']
             total += subtotal
-            text += f"📦 *{item['name']}*\n"
-            text += f"   {item['quantity']} units × ${item['price']:.2f} = *${subtotal:.2f}*\n\n"
+            text += f"• {item['quantity']}x {item['name']} = ${subtotal:.2f}\n"
         
-        text += "="*25 + "\n"
-        text += f"💰 *TOTAL: ${total:.2f} USDT*\n\n"
-        text += "Ready to checkout? 🚀"
+        text += f"\n💰 *TOTAL: ${total:.2f}*"
+        
+        if vip_status["is_vip"]:
+            text += f"\n👑 *VIP {vip_status['discount']}% discount applied!*"
         
         keyboard = get_cart_keyboard(has_items=True)
     
@@ -188,21 +213,17 @@ async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = await get_user_stats(user_id)
     
     if not orders:
-        text = "📦 *No orders yet!*\n\n"
-        text += "Time to change that! Your muscles are waiting! 💪\n\n"
-        text += "Hit /shop to browse our premium selection!"
+        text = "📦 *No orders yet!*\nTime to change that! 💪"
     else:
-        text = "📦 *YOUR ORDER HISTORY*\n" + "="*25 + "\n\n"
+        text = f"📦 *YOUR ORDERS*\n"
+        text += f"Total: {stats['total_orders']} | Spent: ${stats['total_spent']:.2f}"
         
-        # Add stats
-        text += f"📊 *Lifetime Stats:*\n"
-        text += f"• Total Orders: {stats['total_orders']}\n"
-        text += f"• Total Spent: ${stats['total_spent']:.2f}\n"
-        text += f"• Member Since: {stats['member_since'].strftime('%B %Y')}\n\n"
+        if stats['is_vip']:
+            text += f" | 👑 VIP {stats['vip_discount']}%"
         
-        text += "="*25 + "\n*Recent Orders:*\n\n"
+        text += "\n\n*Recent orders:*\n"
         
-        for order in orders:
+        for order in orders[:5]:  # Show only 5 recent orders
             status_emoji = {
                 "pending": "⏳", 
                 "paid": "💰", 
@@ -211,9 +232,7 @@ async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "cancelled": "❌"
             }.get(order['status'], "❓")
             
-            text += f"{status_emoji} `{order['order_number']}`\n"
-            text += f"   📅 {order['created_at'].strftime('%d %b %Y')}\n"
-            text += f"   💵 ${order['total_usdt']:.2f} • {order['status'].upper()}\n\n"
+            text += f"{status_emoji} `{order['order_number']}` ${order['total_usdt']:.2f} USDT\n"
     
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🍕 Order More", callback_data="shop")],
@@ -244,12 +263,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # Default response for unexpected messages
         await update.message.reply_text(
-            "Hey! Not sure what you mean... 🤔\n\n"
-            "Use the menu buttons or try these commands:\n"
-            "• /shop - Browse products\n"
-            "• /cart - View your cart\n"
-            "• /orders - See your orders\n"
-            "• /help - Get help",
+            "Use the menu buttons or commands:\n/shop /cart /orders /help",
             reply_markup=get_main_menu_keyboard()
         )
 
@@ -258,17 +272,12 @@ async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     user_id = update.effective_user.id
     
     if len(city) < 2:
-        await update.message.reply_text(
-            "❌ That doesn't look like a real city name!\n\n"
-            "Please enter a valid city name (minimum 2 characters):"
-        )
+        await update.message.reply_text("❌ Enter a valid city name (min 2 characters):")
         return
     
     # Validate city doesn't contain suspicious characters
     if any(char in city for char in ['<', '>', '/', '\\', '@', '#']):
-        await update.message.reply_text(
-            "❌ Please enter a valid city name without special characters:"
-        )
+        await update.message.reply_text("❌ Enter a valid city name:")
         return
     
     context.user_data['delivery_city'] = city
@@ -278,7 +287,7 @@ async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     country = context.user_data.get('delivery_country', 'Unknown')
     
     await update.message.reply_text(
-        f"✅ *Great!* Shipping to: {city}, {country}\n\n" + 
+        f"✅ Shipping to: {city}, {country}\n" + 
         MESSAGES["ask_referral"],
         reply_markup=get_referral_keyboard(),
         parse_mode='Markdown'
@@ -288,40 +297,59 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
     """Handle referral code input"""
     user_id = update.effective_user.id
     
+    # Check if user has VIP discount
+    vip_status = await get_user_vip_status(user_id)
+    
     # Validate referral code
     referral = await validate_referral_code(code)
     
     if referral:
         # Calculate discount
         total = context.user_data.get('checkout_total', 0)
-        discount_amount, new_total = await calculate_discount(total, referral)
         
-        # Store in context
-        context.user_data['referral_code'] = code.upper()
-        context.user_data['discount_amount'] = discount_amount
-        context.user_data['final_total'] = new_total
-        
-        # Show success message
-        discount_text = f"{referral['discount_value']}%"
-        if referral['discount_type'] == 'fixed':
-            discount_text = f"${referral['discount_value']:.2f}"
-        
-        text = MESSAGES["referral_applied"].format(
-            code=code.upper(),
-            discount_text=discount_text,
-            original=total,
-            discount_amount=discount_amount,
-            new_total=new_total
-        )
-        
-        from .keyboards import get_payment_keyboard
-        keyboard = get_payment_keyboard()
-        
-        await update.message.reply_text(
-            text + "\n\n" + MESSAGES["payment_select"],
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
+        # If VIP, show that VIP discount is better
+        if vip_status["is_vip"] and vip_status["discount"] > 0:
+            await update.message.reply_text(
+                f"👑 *You already have VIP {vip_status['discount']}% discount!*\n"
+                f"This is better than the referral code.\n\n"
+                + MESSAGES["payment_select"],
+                reply_markup=get_payment_keyboard(),
+                parse_mode='Markdown'
+            )
+            context.user_data['referral_code'] = None
+            context.user_data['discount_amount'] = 0
+            context.user_data['final_total'] = total
+            context.user_data['vip_discount_applied'] = True
+        else:
+            # Apply referral discount
+            discount_amount, new_total = await calculate_discount(total, referral)
+            
+            # Store in context
+            context.user_data['referral_code'] = code.upper()
+            context.user_data['discount_amount'] = discount_amount
+            context.user_data['final_total'] = new_total
+            
+            # Show success message
+            discount_text = f"{referral['discount_value']}%"
+            if referral['discount_type'] == 'fixed':
+                discount_text = f"${referral['discount_value']:.2f}"
+            
+            text = MESSAGES["referral_applied"].format(
+                code=code.upper(),
+                discount_text=discount_text,
+                original=total,
+                discount_amount=discount_amount,
+                new_total=new_total
+            )
+            
+            from .keyboards import get_payment_keyboard
+            keyboard = get_payment_keyboard()
+            
+            await update.message.reply_text(
+                text + "\n" + MESSAGES["payment_select"],
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
     else:
         # Invalid code
         await update.message.reply_text(
