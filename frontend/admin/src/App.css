@@ -189,7 +189,7 @@ html {
   flex-direction: column;
 }
 
-/* Mobile Navigation */
+/* Header */
 header {
   background: rgba(28, 28, 30, 0.9);
   backdrop-filter: blur(20px);
@@ -201,16 +201,54 @@ header {
   padding: 16px;
 }
 
-header h1 {
-  font-size: 24px;
-  font-weight: 700;
-  text-align: center;
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 16px;
-  letter-spacing: -0.5px;
 }
 
-/* Mobile-optimized navigation */
-nav {
+.mobile-menu-toggle {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 8px;
+  margin: -8px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-info {
+  font-size: 14px;
+  color: var(--text-secondary);
+  display: none;
+}
+
+.logout-icon {
+  background: none;
+  border: none;
+  color: var(--accent-danger);
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-small);
+  transition: var(--transition);
+}
+
+.logout-icon:hover {
+  background: rgba(255, 69, 58, 0.1);
+}
+
+/* Desktop Navigation */
+.desktop-nav {
   display: flex;
   gap: 8px;
   overflow-x: auto;
@@ -219,11 +257,11 @@ nav {
   scrollbar-width: none;
 }
 
-nav::-webkit-scrollbar {
+.desktop-nav::-webkit-scrollbar {
   display: none;
 }
 
-nav button {
+.desktop-nav button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -240,24 +278,161 @@ nav button {
   flex-shrink: 0;
 }
 
-nav button:hover {
+.desktop-nav button:hover {
   background: var(--bg-elevated);
   color: var(--text-primary);
   transform: translateY(-1px);
 }
 
-nav button.active {
+.desktop-nav button.active {
   background: var(--accent-primary);
   color: white;
   border-color: var(--accent-primary);
   box-shadow: 0 4px 16px rgba(0, 122, 255, 0.3);
 }
 
-nav button.logout {
-  margin-left: auto;
-  background: var(--accent-danger);
+/* Mobile Navigation */
+.mobile-nav {
+  position: fixed;
+  top: 0;
+  right: -300px;
+  width: 300px;
+  height: 100%;
+  background: var(--bg-secondary);
+  z-index: 1000;
+  transition: transform 0.3s ease;
+  display: none;
+  flex-direction: column;
+}
+
+.mobile-nav.open {
+  transform: translateX(-300px);
+}
+
+.mobile-nav-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  display: none;
+}
+
+.mobile-nav-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.mobile-nav-header h2 {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.mobile-nav-header button {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 8px;
+  margin: -8px;
+}
+
+.mobile-nav-items {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.mobile-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 16px;
+  margin-bottom: 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-small);
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: left;
+}
+
+.mobile-nav-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.mobile-nav-item.active {
+  background: var(--accent-primary);
   color: white;
-  border-color: var(--accent-danger);
+}
+
+.mobile-logout {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 40px);
+  margin: 20px;
+  padding: 16px;
+  background: var(--accent-danger);
+  border: none;
+  border-radius: var(--radius-small);
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.mobile-logout:hover {
+  background: #D70015;
+}
+
+/* Mobile Bottom Navigation */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(28, 28, 30, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--separator);
+  padding: 8px 0 env(safe-area-inset-bottom);
+  z-index: 100;
+}
+
+.bottom-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.bottom-nav-item:active {
+  transform: scale(0.95);
+}
+
+.bottom-nav-item.active {
+  color: var(--accent-primary);
 }
 
 /* Main Content */
@@ -474,73 +649,102 @@ main {
   margin-bottom: 24px;
 }
 
+/* Orders Table Specific */
+.orders-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.orders-table table {
+  width: 100%;
+  min-width: 800px;
+  border-collapse: collapse;
+}
+
+.orders-table thead {
+  background: var(--bg-tertiary);
+}
+
+.orders-table th {
+  padding: 16px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--separator);
+  white-space: nowrap;
+}
+
+.orders-table td {
+  padding: 16px;
+  border-bottom: 1px solid var(--separator);
+  vertical-align: top;
+}
+
+.orders-table tr {
+  transition: var(--transition);
+}
+
+.orders-table tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.order-number {
+  font-family: 'SF Mono', monospace;
+  font-weight: 600;
+  color: var(--accent-primary);
+}
+
+.status-select {
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-small);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
 /* Mobile Table View */
 @media (max-width: 768px) {
-  table {
+  .desktop-only {
+    display: none !important;
+  }
+
+  .mobile-menu-toggle {
     display: block;
   }
 
-  thead {
+  .desktop-nav {
     display: none;
   }
 
-  tbody {
-    display: block;
-  }
-
-  tr {
-    display: block;
-    margin-bottom: 16px;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-small);
-    padding: 16px;
-    border: 1px solid var(--separator);
-  }
-
-  td {
+  .mobile-nav {
     display: flex;
-    justify-content: space-between;
-    padding: 8px 0;
-    border: none;
   }
 
-  td::before {
-    content: attr(data-label);
-    font-weight: 600;
-    color: var(--text-secondary);
-    font-size: 14px;
-  }
-}
-
-/* Desktop Table View */
-@media (min-width: 769px) {
-  table {
-    width: 100%;
-    border-collapse: collapse;
+  .mobile-nav-overlay {
+    display: block;
   }
 
-  thead {
-    background: var(--bg-tertiary);
+  .mobile-bottom-nav {
+    display: flex;
   }
 
-  th {
-    padding: 16px;
-    text-align: left;
-    font-weight: 600;
-    color: var(--text-secondary);
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid var(--separator);
+  main {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom));
   }
 
-  td {
-    padding: 16px;
-    border-bottom: 1px solid var(--separator);
+  header h1 {
+    font-size: 20px;
   }
 
-  tr:hover {
-    background: rgba(255, 255, 255, 0.02);
+  .orders-table {
+    margin: 0 -20px;
+    width: calc(100% + 40px);
+    border-radius: 0;
   }
 }
 
@@ -794,7 +998,7 @@ main {
 @media (max-width: 768px) {
   .fab {
     position: fixed;
-    bottom: 24px;
+    bottom: 80px;
     right: 24px;
     width: 56px;
     height: 56px;
@@ -900,4 +1104,37 @@ input[type="checkbox"]:checked::after {
 @keyframes skeleton-loading {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* Close button fix */
+.close-button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 8px;
+  margin: -8px;
+  border-radius: var(--radius-small);
+  transition: var(--transition);
+}
+
+.close-button:hover {
+  background: var(--bg-tertiary);
+}
+
+/* Price formatting */
+.price {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Desktop specific */
+@media (min-width: 769px) {
+  .user-info {
+    display: inline;
+  }
+}
+
+@keyframes slideOutRight {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
 }

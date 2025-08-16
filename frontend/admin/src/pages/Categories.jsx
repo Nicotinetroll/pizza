@@ -1,6 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, AlertCircle, ArrowUp, ArrowDown, Grid } from 'lucide-react';
-import { categoriesAPI } from '../services/api';
+import { Plus, Edit, Trash2, AlertCircle, X, Grid } from 'lucide-react';
 
 const Categories = () => {
     const [categories, setCategories] = useState([]);
@@ -15,6 +14,44 @@ const Categories = () => {
         is_active: true
     });
     const [formError, setFormError] = useState('');
+
+    // API helper functions
+    const apiCall = async (url, options = {}) => {
+        const token = localStorage.getItem('token');
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': token ? `Bearer ${token}` : '',
+                ...options.headers
+            }
+        });
+
+        if (!response.ok) {
+            if (response.status === 401) {
+                localStorage.removeItem('token');
+                window.location.href = '/';
+            }
+            throw new Error(`API Error: ${response.status}`);
+        }
+
+        return response.json();
+    };
+
+    const categoriesAPI = {
+        getAll: () => apiCall('/api/categories'),
+        create: (data) => apiCall('/api/categories', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }),
+        update: (id, data) => apiCall(`/api/categories/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        }),
+        delete: (id) => apiCall(`/api/categories/${id}`, {
+            method: 'DELETE'
+        })
+    };
 
     useEffect(() => {
         fetchCategories();
@@ -49,9 +86,7 @@ const Categories = () => {
         return true;
     };
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-
+    const handleSubmit = async () => {
         if (!validateForm()) return;
 
         try {
@@ -66,7 +101,7 @@ const Categories = () => {
             resetForm();
             fetchCategories();
         } catch (error) {
-            setFormError(error.response?.data?.detail || error.message || 'Error saving category');
+            setFormError(error.message || 'Error saving category');
         }
     };
 
@@ -83,7 +118,7 @@ const Categories = () => {
             showToast('✅ Category deleted!', 'success');
             fetchCategories();
         } catch (error) {
-            showToast('❌ Error: ' + (error.response?.data?.detail || error.message), 'error');
+            showToast('❌ Error: ' + error.message, 'error');
         }
     };
 
@@ -181,7 +216,7 @@ const Categories = () => {
                         </button>
                     </div>
 
-                    <form onSubmit={handleSubmit}>
+                    <div>
                         <div className="form-group">
                             <label>Category Name</label>
                             <input
@@ -189,7 +224,6 @@ const Categories = () => {
                                 placeholder="e.g., Bulking Essentials"
                                 value={formData.name}
                                 onChange={(e) => setFormData({...formData, name: e.target.value})}
-                                required
                                 maxLength={50}
                             />
                         </div>
@@ -200,7 +234,6 @@ const Categories = () => {
                                 placeholder="Category description (min 10 characters)"
                                 value={formData.description}
                                 onChange={(e) => setFormData({...formData, description: e.target.value})}
-                                required
                                 minLength={10}
                                 maxLength={200}
                                 rows={3}
@@ -213,7 +246,6 @@ const Categories = () => {
                                 {commonEmojis.map(emoji => (
                                     <button
                                         key={emoji}
-                                        type="button"
                                         className={`emoji-option ${formData.emoji === emoji ? 'selected' : ''}`}
                                         onClick={() => setFormData({...formData, emoji})}
                                     >
@@ -264,14 +296,14 @@ const Categories = () => {
                         )}
 
                         <div className="form-buttons">
-                            <button type="submit" className="btn btn-success">
+                            <button className="btn btn-success" onClick={handleSubmit}>
                                 {editingCategory ? 'Update' : 'Add'} Category
                             </button>
-                            <button type="button" className="btn btn-secondary" onClick={resetForm}>
+                            <button className="btn btn-secondary" onClick={resetForm}>
                                 Cancel
                             </button>
                         </div>
-                    </form>
+                    </div>
                 </div>
             )}
 
@@ -482,19 +514,44 @@ const Categories = () => {
                     padding: 12px 0;
                 }
 
+                .form-row {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 16px;
+                }
+
+                .form-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 24px;
+                }
+
+                .form-group {
+                    margin-bottom: 20px;
+                }
+
+                .form-group label {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: var(--text-secondary);
+                }
+
                 @media (max-width: 768px) {
                     .categories-list {
                         grid-template-columns: 1fr;
                     }
-                    
+
                     .emoji-picker {
                         grid-template-columns: repeat(4, 1fr);
                     }
-                    
+
                     .category-actions {
                         flex-direction: column;
                     }
-                    
+
                     .category-actions button {
                         width: 100%;
                     }
@@ -504,22 +561,16 @@ const Categories = () => {
                     .category-header {
                         flex-wrap: wrap;
                     }
-                    
+
                     .category-order {
                         position: absolute;
                         top: 24px;
                         right: 24px;
                     }
-                }
 
-                @keyframes slideInRight {
-                    from { transform: translateX(100%); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
-                }
-
-                @keyframes slideOutRight {
-                    from { transform: translateX(0); opacity: 1; }
-                    to { transform: translateX(100%); opacity: 0; }
+                    .form-row {
+                        grid-template-columns: 1fr;
+                    }
                 }
             `}</style>
         </div>
