@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, AlertCircle, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Edit, Trash2, AlertCircle, ArrowUp, ArrowDown, Grid } from 'lucide-react';
 import { categoriesAPI } from '../services/api';
 
 const Categories = () => {
@@ -26,6 +26,7 @@ const Categories = () => {
             setCategories(response.categories || []);
         } catch (error) {
             console.error('Error fetching categories:', error);
+            showToast('❌ Error loading categories', 'error');
         } finally {
             setLoading(false);
         }
@@ -56,10 +57,10 @@ const Categories = () => {
         try {
             if (editingCategory) {
                 await categoriesAPI.update(editingCategory._id, formData);
-                alert('✅ Category updated successfully!');
+                showToast('✅ Category updated successfully!', 'success');
             } else {
                 await categoriesAPI.create(formData);
-                alert('✅ Category created successfully!');
+                showToast('✅ Category created successfully!', 'success');
             }
 
             resetForm();
@@ -71,18 +72,18 @@ const Categories = () => {
 
     const handleDelete = async (category) => {
         if (category.product_count > 0) {
-            alert(`❌ Cannot delete category with ${category.product_count} products!\n\nRemove all products first.`);
+            showToast(`❌ Cannot delete category with ${category.product_count} products!`, 'error');
             return;
         }
 
-        if (!confirm(`Delete category "${category.name}"?\n\nThis cannot be undone!`)) return;
+        if (!window.confirm(`Delete category "${category.name}"?\n\nThis cannot be undone!`)) return;
 
         try {
             await categoriesAPI.delete(category._id);
-            alert('✅ Category deleted!');
+            showToast('✅ Category deleted!', 'success');
             fetchCategories();
         } catch (error) {
-            alert('❌ Error: ' + (error.response?.data?.detail || error.message));
+            showToast('❌ Error: ' + (error.response?.data?.detail || error.message), 'error');
         }
     };
 
@@ -112,10 +113,51 @@ const Categories = () => {
         setFormError('');
     };
 
-    const commonEmojis = ['💪', '🍕', '💉', '🏋️', '🔥', '⚡', '💊', '🚀', '📦', '🎯', '💯', '⭐'];
+    const showToast = (message, type) => {
+        const existingToast = document.querySelector('.toast');
+        if (existingToast) existingToast.remove();
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: ${type === 'success' ? 'var(--accent-success)' : 'var(--accent-danger)'};
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideInRight 0.3s ease-out;
+            max-width: 90vw;
+        `;
+
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.animation = 'slideOutRight 0.3s ease-out forwards';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    };
+
+    const commonEmojis = ['💪', '🏋️', '💉', '💊', '🔥', '⚡', '🚀', '⭐', '💯', '🎯', '📦', '🛡️'];
 
     if (loading) {
-        return <div className="loading">Loading categories...</div>;
+        return (
+            <div className="categories-section">
+                <div className="section-header">
+                    <h2 className="skeleton" style={{width: '150px', height: '36px'}}></h2>
+                    <div className="skeleton" style={{width: '140px', height: '44px', borderRadius: '12px'}}></div>
+                </div>
+                <div className="categories-list">
+                    {[1,2,3,4].map(i => (
+                        <div key={i} className="category-card skeleton" style={{height: '120px'}}></div>
+                    ))}
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -123,7 +165,7 @@ const Categories = () => {
             <div className="section-header">
                 <h2>Categories ({categories.length})</h2>
                 <button
-                    className="btn-primary"
+                    className="btn btn-primary desktop-only"
                     onClick={() => setShowForm(!showForm)}
                 >
                     <Plus size={20} /> Add Category
@@ -131,45 +173,49 @@ const Categories = () => {
             </div>
 
             {showForm && (
-                <div className="product-form">
-                    <h3>{editingCategory ? 'Edit Category' : 'Add New Category'}</h3>
+                <div className="form-container">
+                    <div className="form-header">
+                        <h3>{editingCategory ? 'Edit Category' : 'Add New Category'}</h3>
+                        <button className="close-button" onClick={resetForm}>
+                            <X size={24} />
+                        </button>
+                    </div>
+
                     <form onSubmit={handleSubmit}>
-                        <input
-                            type="text"
-                            placeholder="Category Name (e.g., Bulking Essentials)"
-                            value={formData.name}
-                            onChange={(e) => setFormData({...formData, name: e.target.value})}
-                            required
-                            maxLength={50}
-                        />
+                        <div className="form-group">
+                            <label>Category Name</label>
+                            <input
+                                type="text"
+                                placeholder="e.g., Bulking Essentials"
+                                value={formData.name}
+                                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                required
+                                maxLength={50}
+                            />
+                        </div>
 
-                        <textarea
-                            placeholder="Description (min 10 characters)"
-                            value={formData.description}
-                            onChange={(e) => setFormData({...formData, description: e.target.value})}
-                            required
-                            minLength={10}
-                            maxLength={200}
-                        />
+                        <div className="form-group">
+                            <label>Description</label>
+                            <textarea
+                                placeholder="Category description (min 10 characters)"
+                                value={formData.description}
+                                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                                required
+                                minLength={10}
+                                maxLength={200}
+                                rows={3}
+                            />
+                        </div>
 
-                        <div style={{ marginBottom: '15px' }}>
-                            <label style={{ display: 'block', marginBottom: '10px', color: '#888' }}>
-                                Select Emoji:
-                            </label>
-                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        <div className="form-group">
+                            <label>Select Emoji</label>
+                            <div className="emoji-picker">
                                 {commonEmojis.map(emoji => (
                                     <button
                                         key={emoji}
                                         type="button"
+                                        className={`emoji-option ${formData.emoji === emoji ? 'selected' : ''}`}
                                         onClick={() => setFormData({...formData, emoji})}
-                                        style={{
-                                            padding: '10px',
-                                            fontSize: '24px',
-                                            background: formData.emoji === emoji ? '#667eea' : '#2a2a2a',
-                                            border: '1px solid #3a3a3a',
-                                            borderRadius: '8px',
-                                            cursor: 'pointer'
-                                        }}
                                     >
                                         {emoji}
                                     </button>
@@ -181,53 +227,47 @@ const Categories = () => {
                                 value={formData.emoji}
                                 onChange={(e) => setFormData({...formData, emoji: e.target.value})}
                                 maxLength={2}
-                                style={{ marginTop: '10px' }}
+                                style={{ marginTop: '12px' }}
                             />
                         </div>
 
-                        <input
-                            type="number"
-                            placeholder="Display Order (1 = first)"
-                            value={formData.order}
-                            onChange={(e) => setFormData({...formData, order: parseInt(e.target.value) || 1})}
-                            min="1"
-                            max="99"
-                        />
+                        <div className="form-row">
+                            <div className="form-group">
+                                <label>Display Order</label>
+                                <input
+                                    type="number"
+                                    placeholder="1"
+                                    value={formData.order}
+                                    onChange={(e) => setFormData({...formData, order: parseInt(e.target.value) || 1})}
+                                    min="1"
+                                    max="99"
+                                />
+                            </div>
 
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#fff' }}>
-                            <input
-                                type="checkbox"
-                                checked={formData.is_active}
-                                onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
-                            />
-                            Active (visible in bot)
-                        </label>
+                            <div className="form-group">
+                                <label className="checkbox-label">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.is_active}
+                                        onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
+                                    />
+                                    <span>Active</span>
+                                </label>
+                            </div>
+                        </div>
 
                         {formError && (
-                            <div style={{
-                                color: '#ff6b6b',
-                                padding: '10px',
-                                background: 'rgba(255, 107, 107, 0.1)',
-                                borderRadius: '5px',
-                                marginTop: '10px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '5px'
-                            }}>
+                            <div className="error-message">
                                 <AlertCircle size={16} />
                                 {formError}
                             </div>
                         )}
 
                         <div className="form-buttons">
-                            <button type="submit" className="btn-success">
+                            <button type="submit" className="btn btn-success">
                                 {editingCategory ? 'Update' : 'Add'} Category
                             </button>
-                            <button
-                                type="button"
-                                className="btn-cancel"
-                                onClick={resetForm}
-                            >
+                            <button type="button" className="btn btn-secondary" onClick={resetForm}>
                                 Cancel
                             </button>
                         </div>
@@ -235,81 +275,253 @@ const Categories = () => {
                 </div>
             )}
 
-            <div className="categories-grid" style={{ marginTop: '20px' }}>
-                {categories.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
-                        No categories yet. Create your first category to organize products!
-                    </div>
-                ) : (
-                    <table style={{ width: '100%', background: '#1a1a1a', borderRadius: '15px', overflow: 'hidden' }}>
-                        <thead>
-                        <tr style={{ background: '#2a2a2a' }}>
-                            <th style={{ padding: '15px' }}>Order</th>
-                            <th>Emoji</th>
-                            <th>Name</th>
-                            <th>Description</th>
-                            <th>Products</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {categories.map(category => (
-                            <tr key={category._id}>
-                                <td style={{ padding: '15px', textAlign: 'center' }}>
-                    <span style={{
-                        background: '#667eea',
-                        padding: '5px 10px',
-                        borderRadius: '20px',
-                        fontWeight: 'bold'
-                    }}>
-                      {category.order}
-                    </span>
-                                </td>
-                                <td style={{ textAlign: 'center', fontSize: '24px' }}>
-                                    {category.emoji || '📦'}
-                                </td>
-                                <td style={{ fontWeight: 'bold' }}>{category.name}</td>
-                                <td style={{ color: '#888', maxWidth: '300px' }}>{category.description}</td>
-                                <td style={{ textAlign: 'center' }}>
-                    <span style={{
-                        background: category.product_count > 0 ? '#00c896' : '#ff6b6b',
-                        padding: '5px 10px',
-                        borderRadius: '20px',
-                        fontSize: '12px'
-                    }}>
-                      {category.product_count || 0}
-                    </span>
-                                </td>
-                                <td>
-                    <span className={`status status-${category.is_active ? 'active' : 'inactive'}`}>
-                      {category.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                                </td>
-                                <td>
-                                    <div style={{ display: 'flex', gap: '5px' }}>
-                                        <button
-                                            onClick={() => handleEdit(category)}
-                                            className="btn-edit"
-                                            style={{ padding: '5px 10px' }}
-                                        >
-                                            <Edit size={16} />
-                                        </button>
-                                        <button
-                                            onClick={() => handleDelete(category)}
-                                            className="btn-delete"
-                                            style={{ padding: '5px 10px' }}
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                        </tbody>
-                    </table>
-                )}
-            </div>
+            {categories.length === 0 ? (
+                <div className="empty-state">
+                    <Grid size={48} />
+                    <h3>No categories yet</h3>
+                    <p>Create your first category to organize products!</p>
+                    <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+                        <Plus size={20} /> Create Category
+                    </button>
+                </div>
+            ) : (
+                <div className="categories-list">
+                    {categories.map(category => (
+                        <div key={category._id} className="category-card">
+                            <div className="category-header">
+                                <div className="category-emoji">{category.emoji || '📦'}</div>
+                                <div className="category-info">
+                                    <h3>{category.name}</h3>
+                                    <p>{category.description}</p>
+                                </div>
+                                <div className="category-order">
+                                    <span className="order-badge">{category.order}</span>
+                                </div>
+                            </div>
+
+                            <div className="category-stats">
+                                <div className="stat">
+                                    <span className="stat-label">Products</span>
+                                    <span className="stat-value">{category.product_count || 0}</span>
+                                </div>
+                                <div className="stat">
+                                    <span className="stat-label">Status</span>
+                                    <span className={`status status-${category.is_active ? 'active' : 'inactive'}`}>
+                                        {category.is_active ? 'Active' : 'Inactive'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="category-actions">
+                                <button onClick={() => handleEdit(category)} className="btn btn-secondary">
+                                    <Edit size={16} /> Edit
+                                </button>
+                                <button
+                                    onClick={() => handleDelete(category)}
+                                    className="btn btn-danger"
+                                    disabled={category.product_count > 0}
+                                >
+                                    <Trash2 size={16} /> Delete
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Floating Action Button for Mobile */}
+            <button className="fab" onClick={() => setShowForm(true)}>
+                <Plus size={24} />
+            </button>
+
+            <style jsx>{`
+                .categories-list {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+                    gap: 20px;
+                    margin-top: 24px;
+                }
+
+                .category-card {
+                    background: var(--bg-secondary);
+                    border: 1px solid var(--separator);
+                    border-radius: var(--radius);
+                    padding: 24px;
+                    transition: var(--transition);
+                }
+
+                .category-card:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+                }
+
+                .category-header {
+                    display: flex;
+                    gap: 16px;
+                    margin-bottom: 20px;
+                    align-items: flex-start;
+                }
+
+                .category-emoji {
+                    font-size: 48px;
+                    width: 64px;
+                    height: 64px;
+                    background: var(--bg-tertiary);
+                    border-radius: 16px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    flex-shrink: 0;
+                }
+
+                .category-info {
+                    flex: 1;
+                }
+
+                .category-info h3 {
+                    font-size: 20px;
+                    font-weight: 600;
+                    margin-bottom: 4px;
+                }
+
+                .category-info p {
+                    font-size: 14px;
+                    color: var(--text-secondary);
+                    line-height: 1.5;
+                }
+
+                .category-order {
+                    flex-shrink: 0;
+                }
+
+                .order-badge {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 36px;
+                    height: 36px;
+                    background: var(--accent-primary);
+                    color: white;
+                    border-radius: 50%;
+                    font-weight: 700;
+                    font-size: 16px;
+                }
+
+                .category-stats {
+                    display: flex;
+                    gap: 24px;
+                    padding: 16px 0;
+                    border-top: 1px solid var(--separator);
+                    border-bottom: 1px solid var(--separator);
+                    margin-bottom: 20px;
+                }
+
+                .stat {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                }
+
+                .stat-label {
+                    font-size: 12px;
+                    color: var(--text-secondary);
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+
+                .stat-value {
+                    font-size: 18px;
+                    font-weight: 600;
+                }
+
+                .category-actions {
+                    display: flex;
+                    gap: 12px;
+                }
+
+                .category-actions button:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+
+                .emoji-picker {
+                    display: grid;
+                    grid-template-columns: repeat(6, 1fr);
+                    gap: 8px;
+                }
+
+                .emoji-option {
+                    width: 56px;
+                    height: 56px;
+                    font-size: 28px;
+                    background: var(--bg-tertiary);
+                    border: 2px solid transparent;
+                    border-radius: 12px;
+                    cursor: pointer;
+                    transition: var(--transition);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+
+                .emoji-option:hover {
+                    background: var(--bg-elevated);
+                }
+
+                .emoji-option.selected {
+                    background: var(--accent-primary);
+                    border-color: var(--accent-primary);
+                }
+
+                .checkbox-label {
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    cursor: pointer;
+                    font-size: 16px;
+                    padding: 12px 0;
+                }
+
+                @media (max-width: 768px) {
+                    .categories-list {
+                        grid-template-columns: 1fr;
+                    }
+                    
+                    .emoji-picker {
+                        grid-template-columns: repeat(4, 1fr);
+                    }
+                    
+                    .category-actions {
+                        flex-direction: column;
+                    }
+                    
+                    .category-actions button {
+                        width: 100%;
+                    }
+                }
+
+                @media (max-width: 640px) {
+                    .category-header {
+                        flex-wrap: wrap;
+                    }
+                    
+                    .category-order {
+                        position: absolute;
+                        top: 24px;
+                        right: 24px;
+                    }
+                }
+
+                @keyframes slideInRight {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+
+                @keyframes slideOutRight {
+                    from { transform: translateX(0); opacity: 1; }
+                    to { transform: translateX(100%); opacity: 0; }
+                }
+            `}</style>
         </div>
     );
 };
