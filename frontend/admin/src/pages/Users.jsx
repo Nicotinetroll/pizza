@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Crown, Edit, Check, X, AlertCircle, Search, Star, TrendingUp, Calendar, Users } from 'lucide-react';
+import { Crown, Edit, Check, X, AlertCircle, Search, Star, TrendingUp, Calendar, Users, Package } from 'lucide-react';
 
 const UsersPage = () => {
   const [users, setUsers] = useState([]);

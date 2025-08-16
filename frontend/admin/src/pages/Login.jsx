@@ -17,8 +17,14 @@ const Login = () => {
     if (emailInput) emailInput.focus();
   }, []);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // Handle Enter key press
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !isLoading) {
+      handleSubmit();
+    }
+  };
+
+  const handleSubmit = async () => {
     setError('');
     setIsLoading(true);
 
@@ -67,7 +73,7 @@ const Login = () => {
           </div>
 
           {/* Login Form */}
-          <form onSubmit={handleSubmit} className="login-form">
+          <div className="login-form">
             <div className="form-group">
               <label htmlFor="email-input">Email</label>
               <div className="input-wrapper">
@@ -78,7 +84,7 @@ const Login = () => {
                     placeholder="admin@example.com"
                     value={email}
                     onChange={handleInputChange(setEmail)}
-                    required
+                    onKeyPress={handleKeyPress}
                     disabled={isLoading}
                     autoComplete="email"
                     maxLength={100}
@@ -97,14 +103,13 @@ const Login = () => {
                     placeholder="••••••••"
                     value={password}
                     onChange={handleInputChange(setPassword)}
-                    required
+                    onKeyPress={handleKeyPress}
                     disabled={isLoading}
                     autoComplete="current-password"
                     maxLength={100}
                     className="input-field"
                 />
                 <button
-                    type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="password-toggle"
                     tabIndex={-1}
@@ -134,9 +139,9 @@ const Login = () => {
             )}
 
             <button
-                type="submit"
                 disabled={isLoading}
                 className="login-button"
+                onClick={handleSubmit}
             >
               {isLoading ? (
                   <>
@@ -147,7 +152,7 @@ const Login = () => {
                   <span>Sign In</span>
               )}
             </button>
-          </form>
+          </div>
 
           {/* Footer */}
           <div className="login-footer">
@@ -160,7 +165,7 @@ const Login = () => {
           </div>
         </div>
 
-        <style jsx>{`
+        <style>{`
         .login-container {
           position: relative;
           display: flex;
@@ -359,7 +364,7 @@ const Login = () => {
           box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
         }
 
-        .input-field:focus + .input-icon {
+        .input-field:focus ~ .input-icon {
           color: var(--accent-primary);
         }
 
@@ -430,6 +435,17 @@ const Login = () => {
           border-radius: 12px;
           margin-bottom: 24px;
           animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
         }
 
         .error-icon {
