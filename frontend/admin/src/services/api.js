@@ -562,6 +562,42 @@ export const adminAPI = {
 };
 
 
+export const notificationsAPI = {
+  getSettings: async () => {
+    const response = await api.get('/notifications/settings');
+    return response.data;
+  },
+
+  updateSettings: async (settings) => {
+    const response = await api.put('/notifications/settings', settings);
+    return response.data;
+  },
+
+  addTemplate: async (template) => {
+    const response = await api.post('/notifications/templates', template);
+    return response.data;
+  },
+
+  deleteTemplate: async (index) => {
+    const response = await api.delete(`/notifications/templates/${index}`);
+    return response.data;
+  },
+
+  sendTest: async () => {
+    const response = await api.post('/notifications/test');
+    return response.data;
+  },
+
+  sendFakeOrder: async () => {
+    const response = await api.post('/notifications/fake-order');
+    return response.data;
+  },
+
+  getLogs: async () => {
+    const response = await api.get('/notifications/logs');
+    return response.data;
+  }
+};
 
 export default api;
 

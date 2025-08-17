@@ -1,5 +1,5 @@
 """
-Enhanced callback query handler with categories and better flow
+Enhanced callback query handler with categories and notifications
 """
 import asyncio
 import secrets
@@ -22,6 +22,7 @@ from .keyboards import (
     get_order_complete_keyboard, get_back_keyboard
 )
 from .config import MESSAGES, CRYPTO_CURRENCIES
+from .public_notifications import public_notifier
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all callback queries with improved flow"""
@@ -289,7 +290,7 @@ async def handle_skip_referral(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_data: str):
-    """Process payment selection with better UX"""
+    """Process payment selection with notifications"""
     query = update.callback_query
     payment_method = payment_data.replace("pay_", "").upper()
     
@@ -338,6 +339,9 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     
     order_id = await create_order(order_data)
     
+    # Send public notification (async in background)
+    asyncio.create_task(public_notifier.send_notification(order_data))
+    
     # Apply referral code usage
     if referral_code:
         await apply_referral_code(referral_code)
@@ -366,7 +370,7 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_fake_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle simulated payment for demo"""
+    """Handle simulated payment for demo with notification"""
     query = update.callback_query
     order_id = data.replace("fake_pay_", "")
     
@@ -385,6 +389,10 @@ async def handle_fake_payment(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if success:
         order = await get_order_by_id(order_id)
+        
+        # Send payment confirmed notification
+        asyncio.create_task(public_notifier.send_notification(order))
+        
         success_text = MESSAGES["payment_confirmed"].format(
             order_number=order['order_number']
         )
@@ -413,16 +421,16 @@ async def show_payment_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 5. Wait for blockchain confirmation
 
 *Important Tips:*
-• Send the exact amount for automatic processing
-• Payments expire after 30 minutes
-• Confirmations usually take 5-15 minutes
-• We'll notify you once confirmed
+- Send the exact amount for automatic processing
+- Payments expire after 30 minutes
+- Confirmations usually take 5-15 minutes
+- We'll notify you once confirmed
 
 *Supported Currencies:*
-• Bitcoin (BTC)
-• Ethereum (ETH)
-• Solana (SOL)
-• Tether (USDT)
+- Bitcoin (BTC)
+- Ethereum (ETH)
+- Solana (SOL)
+- Tether (USDT)
 
 Need more help? Contact support!
 """
