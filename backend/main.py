@@ -731,6 +731,7 @@ async def get_notification_settings(email: str = Depends(verify_token)):
     settings = await db.notification_settings.find_one({"_id": "main"})
     if not settings:
         settings = {
+            "_id": "main",
             "enabled": False,
             "channel_id": None,
             "delay_min": 60,
@@ -740,7 +741,8 @@ async def get_notification_settings(email: str = Depends(verify_token)):
             "fake_orders_per_hour": 2,
             "message_templates": []
         }
-    settings["_id"] = "main"
+    else:
+        settings["_id"] = "main"
     return settings
 
 @app.put("/api/notifications/settings")
@@ -826,8 +828,15 @@ async def get_notification_logs(
 ):
     logs = await db.notification_logs.find({}).sort("sent_at", -1).limit(limit).to_list(limit)
     
+    # Convert ObjectId to string
     for log in logs:
-        log["_id"] = str(log["_id"])
+        if "_id" in log:
+            log["_id"] = str(log["_id"])
+        if "order_id" in log and log["order_id"]:
+            try:
+                log["order_id"] = str(log["order_id"])
+            except:
+                pass
     
     return {"logs": logs, "total": len(logs)}
 

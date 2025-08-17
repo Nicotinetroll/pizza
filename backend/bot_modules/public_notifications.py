@@ -1,5 +1,6 @@
 """
-Public notification system with admin control
+FIXED public_notifications.py - 100% realistic amounts based on products
+No rounding, exact prices like 176.34, 2953.67 etc.
 """
 import logging
 import random
@@ -8,7 +9,7 @@ from telegram import Bot
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from motor.motor_asyncio import AsyncIOMotorClient
-from .config import BOT_TOKEN, MONGODB_URI
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ class PublicNotificationManager:
     """Manage public notifications with database configuration"""
     
     def __init__(self):
+        from .config import BOT_TOKEN, MONGODB_URI
+        
         self.bot = Bot(token=BOT_TOKEN)
         self.mongo_client = AsyncIOMotorClient(MONGODB_URI)
         self.db = self.mongo_client.telegram_shop
@@ -35,7 +38,6 @@ class PublicNotificationManager:
         """Get notification settings from database"""
         settings = await self.db.notification_settings.find_one({"_id": "main"})
         if not settings:
-            # Default settings
             return {
                 "enabled": False,
                 "channel_id": None,
@@ -44,14 +46,116 @@ class PublicNotificationManager:
                 "show_exact_amount": False,
                 "fake_orders_enabled": False,
                 "fake_orders_per_hour": 2,
+                "fake_order_min_amount": 100,
+                "fake_order_max_amount": 3000,
                 "message_templates": []
             }
         return settings
     
+    async def get_realistic_order_amount(self, min_amount: float = 100, max_amount: float = 3000) -> float:
+        """Generate 100% realistic order amounts - NO ROUNDING!"""
+        try:
+            # Get all active products from database
+            products = await self.db.products.find({
+                "is_active": True,
+                "price_usdt": {"$gt": 0}
+            }).to_list(100)
+            
+            if not products:
+                # No products - return random float with 2 decimals
+                return round(random.uniform(min_amount, max_amount), 2)
+            
+            # Extract all product prices (keep exact decimals!)
+            prices = [float(p.get("price_usdt", 0)) for p in products if p.get("price_usdt")]
+            
+            if not prices:
+                return round(random.uniform(min_amount, max_amount), 2)
+            
+            # Generate ALL possible realistic combinations
+            possible_amounts = []
+            
+            # Strategy 1: Single product, multiple quantities (most common)
+            # Try to fill the ENTIRE range with realistic quantities
+            for price in prices:
+                # Calculate max quantity for this product
+                max_qty = int(max_amount / price) if price > 0 else 1
+                
+                # Generate various quantities
+                for qty in range(1, min(max_qty + 1, 50)):  # Up to 50 items
+                    total = price * qty
+                    if min_amount <= total <= max_amount:
+                        possible_amounts.append(total)
+            
+            # Strategy 2: Bundles (2-4 different products)
+            # Generate MANY combinations to cover entire range
+            for _ in range(100):  # Generate 100 different bundles
+                num_products = random.randint(2, min(4, len(prices)))
+                selected_prices = random.sample(prices, num_products)
+                
+                # Random quantities for each product
+                quantities = [random.randint(1, 10) for _ in selected_prices]
+                total = sum(price * qty for price, qty in zip(selected_prices, quantities))
+                
+                if min_amount <= total <= max_amount:
+                    possible_amounts.append(total)
+            
+            # Strategy 3: Fill gaps with calculated combinations
+            # If we need amounts near max_amount, calculate them
+            if max_amount > 2000:
+                # Try to create amounts close to max
+                target_ranges = [
+                    (max_amount * 0.9, max_amount),     # 90-100% of max
+                    (max_amount * 0.7, max_amount * 0.9), # 70-90% of max
+                    (max_amount * 0.5, max_amount * 0.7), # 50-70% of max
+                ]
+                
+                for target_min, target_max in target_ranges:
+                    # Find combinations that hit this range
+                    for _ in range(20):
+                        # Pick random products
+                        num_products = random.randint(1, min(5, len(prices)))
+                        selected_prices = random.sample(prices, num_products)
+                        
+                        # Calculate quantities to reach target
+                        base_total = sum(selected_prices)
+                        if base_total > 0:
+                            multiplier = target_min / base_total
+                            
+                            # Generate bundle with this multiplier (with variation)
+                            quantities = [
+                                max(1, int(multiplier * random.uniform(0.8, 1.2)))
+                                for _ in selected_prices
+                            ]
+                            
+                            total = sum(price * qty for price, qty in zip(selected_prices, quantities))
+                            
+                            if min_amount <= total <= max_amount:
+                                possible_amounts.append(total)
+            
+            # Remove duplicates and sort
+            possible_amounts = list(set(possible_amounts))
+            
+            if not possible_amounts:
+                # Fallback - at least use product multiples
+                for price in prices:
+                    multiplier = random.uniform(min_amount / price, max_amount / price)
+                    qty = max(1, int(multiplier))
+                    return price * qty
+            
+            # EQUAL distribution across entire range!
+            # Don't prefer small amounts
+            return random.choice(possible_amounts)
+            
+        except Exception as e:
+            logger.error(f"Error generating amount: {e}")
+            # Fallback - random float with 2 decimals
+            return round(random.uniform(min_amount, max_amount), 2)
+    
     async def get_amount_display(self, amount: float, show_exact: bool) -> str:
         """Get amount display based on settings"""
         if show_exact:
-            return f"${amount:.0f}"
+            # Show exact amount with 2 decimals
+            return f"${amount:.2f}"
         
         # Show ranges for privacy
         if amount < 50:
@@ -64,25 +168,41 @@ class PublicNotificationManager:
             return "$200-500"
         elif amount < 1000:
             return "$500-1000"
+        elif amount < 2000:
+            return "$1000-2000"
+        elif amount < 3000:
+            return "$2000-3000"
         else:
-            return "$1000+"
+            return "$3000+"
     
     async def get_random_template(self, amount: float) -> str:
         """Get random message template from database"""
         settings = await self.get_notification_settings()
         templates = settings.get("message_templates", [])
         
-        # Filter templates by amount range
-        if amount >= 500:
-            templates = [t for t in templates if t.get("type") == "big_order"] or templates
-        
         if not templates:
-            # Default templates
+            # Default templates - epic messages
             templates = [
-                {"text": "🔥 *NEW ORDER!*\n\n💰 Amount: {amount}\n📍 Shipping to: {flag} {country}\n\n_Another satisfied customer!_ 💪"},
-                {"text": "🚀 *ORDER PLACED!*\n\n💵 {amount} order\n📦 Sending to {flag} {country}\n\n_Quality gear on the way!_ 💉"},
-                {"text": "✅ *NEW PURCHASE!*\n\n💰 {amount}\n🚚 Delivery to {flag} {country}\n\n_Thanks for trusting us!_ 🍕"}
+                {"text": "🔥 *BOOM!* {flag} {country} just dropped {amount} on gains\n\n_Another warrior joins the anabolic army_ 💪\n\nThis is the way."},
+                {"text": "💉 *{country} KNOWS WHAT'S UP*\n\n{amount} worth of pure anabolic excellence heading to {flag}\n\n_While you're reading this, they're already growing_ 🚀"},
+                {"text": "⚡ *INJECTION DETECTED*\n\n{flag} {country} injected {amount} into their gains portfolio\n\n_Tren hard, eat clen, anavar give up!_ 💯"},
+                {"text": "🎯 *{country} MAKING MOVES*\n\nJust secured {amount} in premium gear {flag}\n\n_Someone's about to look absolutely diced_ 🔥\n\nRespect the dedication!"},
+                {"text": "💀 *BEAST MODE: {country}*\n\n{amount} invested in getting absolutely yoked {flag}\n\n_Leaving humanity behind, one order at a time_ 👹"},
+                {"text": "🚀 *{flag} {country} BLAST OFF*\n\nDropped {amount} like it's leg day\n\n_While natties debate, this legend elevates_ 💪\n\n#GainsOverEverything"},
+                {"text": "⚡ *SOMEONE IN {country} CHOSE VIOLENCE*\n\n{amount} worth of anabolic warfare {flag}\n\n_Muscles: confused\nGains: imminent\nNatty card: revoked_ 😈"},
+                {"text": "🏆 *{country} ENTERS THE CHAT*\n\n{flag} Just copped {amount} in elite supplements\n\n_Dysmorphia says \"not big enough\"\nWallet says \"yes daddy\"_ 💸"},
+                {"text": "🔥 *ANABOLIC ALERT FROM {country}*\n\n{amount} order confirmed {flag}\n\n_Somewhere a gym mirror just cracked from future gains_ 💥\n\nThis is peak performance."},
+                {"text": "💊 *{flag} {country} PRESCRIPTION: GAINS*\n\nDosage: {amount} of pure excellence\n\n_Side effects may include:\n• Looking absolutely peeled\n• Shirt splitting syndrome\n• Excessive confidence_ 💯"}
             ]
+        
+        # For big orders, add more impressive templates
+        if amount >= 1500:
+            big_templates = [
+                {"text": "🐋 *WHALE ALERT FROM {country}!*\n\n{flag} Just dropped {amount} like a boss\n\n_This isn't just an order, it's a statement._\n\n*RESPECT THE COMMITMENT* 👑"},
+                {"text": "💎 *{country} GOING ALL IN*\n\n{amount} investment in absolute dominance {flag}\n\n_Someone just bought the entire gym's respect_ 💯\n\nBuilt different."},
+                {"text": "🔱 *LEGENDARY ORDER FROM {country}*\n\n{flag} {amount} worth of pure excellence\n\n_The kind of commitment that separates champions from everyone else_ 🏆"}
+            ]
+            templates.extend(big_templates)
         
         return random.choice(templates).get("text", "New order placed!")
     
@@ -91,8 +211,13 @@ class PublicNotificationManager:
         try:
             settings = await self.get_notification_settings()
             
-            if not settings["enabled"] or not settings["channel_id"]:
-                logger.info("Notifications disabled or no channel set")
+            if not settings["enabled"]:
+                logger.info("Notifications disabled")
+                return False
+            
+            channel_id = settings.get("channel_id")
+            if not channel_id:
+                logger.info("No channel ID set in notification settings")
                 return False
             
             # Prepare data
@@ -115,11 +240,12 @@ class PublicNotificationManager:
                     settings.get("delay_min", 60),
                     settings.get("delay_max", 300)
                 )
+                logger.info(f"Waiting {delay} seconds before sending notification")
                 await asyncio.sleep(delay)
             
             # Send to channel
             await self.bot.send_message(
-                chat_id=settings["channel_id"],
+                chat_id=channel_id,
                 text=message,
                 parse_mode='Markdown',
                 disable_web_page_preview=True
@@ -127,12 +253,15 @@ class PublicNotificationManager:
             
             # Log notification
             await self.db.notification_logs.insert_one({
-                "type": "real_order",
+                "type": "real_order" if not order_data.get("_id", "").startswith("fake_") else "fake_order",
                 "order_id": order_data.get("_id"),
+                "amount": amount,
+                "country": country,
                 "sent_at": datetime.utcnow(),
-                "channel_id": settings["channel_id"]
+                "channel_id": channel_id
             })
             
+            logger.info(f"Notification sent - Amount: ${amount:.2f} to {country}")
             return True
             
         except Exception as e:
@@ -140,20 +269,44 @@ class PublicNotificationManager:
             return False
     
     async def send_fake_order(self) -> bool:
-        """Send fake order notification for marketing"""
+        """Send fake order notification with realistic amounts"""
         try:
             settings = await self.get_notification_settings()
             
             if not settings.get("fake_orders_enabled"):
+                logger.info("Fake orders disabled")
                 return False
             
-            # Generate random fake order data
-            countries = list(self.country_flags.keys())
-            country = random.choice(countries)
+            # Get min/max amounts from settings
+            min_amount = settings.get("fake_order_min_amount", 100)
+            max_amount = settings.get("fake_order_max_amount", 3000)
             
-            # Random amount between 50-500
-            amounts = [75, 100, 150, 200, 250, 300, 350, 400, 450, 500]
-            amount = random.choice(amounts)
+            # Generate REALISTIC amount based on products
+            amount = await self.get_realistic_order_amount(min_amount, max_amount)
+            
+            # Random country with weighted selection
+            country_weights = {
+                "Germany": 3, "Netherlands": 3, "France": 2, "Belgium": 2,
+                "Austria": 2, "Poland": 2, "Italy": 2, "Spain": 2,
+                "Czechia": 1, "Slovakia": 1, "Hungary": 1, "Romania": 1,
+                "Bulgaria": 1, "Greece": 1, "Portugal": 1, "Sweden": 1,
+                "Finland": 1, "Denmark": 1, "Ireland": 1, "Luxembourg": 1
+            }
+            
+            # For big orders, slightly prefer rich countries
+            if amount > 1500:
+                country_weights["Germany"] = 4
+                country_weights["Netherlands"] = 3
+                country_weights["Luxembourg"] = 2
+                country_weights["Sweden"] = 2
+            
+            countries = []
+            weights = []
+            for c, w in country_weights.items():
+                countries.append(c)
+                weights.append(w)
+            
+            country = random.choices(countries, weights=weights)[0]
             
             fake_order = {
                 "delivery_country": country,
@@ -161,14 +314,8 @@ class PublicNotificationManager:
                 "_id": f"fake_{datetime.utcnow().timestamp()}"
             }
             
+            logger.info(f"Sending fake order: ${amount:.2f} to {country}")
             await self.send_notification(fake_order)
-            
-            # Log fake order
-            await self.db.notification_logs.insert_one({
-                "type": "fake_order",
-                "fake_data": fake_order,
-                "sent_at": datetime.utcnow()
-            })
             
             return True
             
@@ -193,15 +340,20 @@ async def fake_order_scheduler():
                     # Calculate interval
                     interval = 3600 / orders_per_hour
                     
-                    # Add some randomness (±20%)
-                    interval = interval * random.uniform(0.8, 1.2)
+                    # Add some randomness (±30%)
+                    interval = interval * random.uniform(0.7, 1.3)
                     
+                    logger.info(f"Next fake order in {interval:.0f} seconds")
                     await asyncio.sleep(interval)
-                    await public_notifier.send_fake_order()
+                    
+                    # Send fake order
+                    success = await public_notifier.send_fake_order()
+                    if success:
+                        logger.info("Fake order sent successfully")
                 else:
-                    await asyncio.sleep(3600)  # Check every hour
+                    await asyncio.sleep(3600)
             else:
-                await asyncio.sleep(300)  # Check every 5 minutes
+                await asyncio.sleep(300)
                 
         except Exception as e:
             logger.error(f"Error in fake order scheduler: {e}")
