@@ -1,6 +1,59 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, AlertCircle } from 'lucide-react';
-import { productsAPI, categoriesAPI } from '../services/api';
+import { Plus, Edit, Trash2, AlertCircle, TrendingUp, DollarSign } from 'lucide-react';
+
+// Mock API for demo
+const mockAPI = {
+  products: {
+    getAll: async () => ({
+      products: [
+        {
+          _id: '1',
+          name: 'Test E 250',
+          description: 'Testosterone Enanthate 250mg/ml',
+          price_usdt: 65,
+          purchase_price_usdt: 35,
+          profit_usdt: 30,
+          profit_margin: 85.71,
+          category_id: '1',
+          category_name: 'Bulking',
+          stock_quantity: 150,
+          sold_count: 45,
+          is_active: true
+        },
+        {
+          _id: '2',
+          name: 'Deca 300',
+          description: 'Nandrolone Decanoate 300mg/ml',
+          price_usdt: 75,
+          purchase_price_usdt: 40,
+          profit_usdt: 35,
+          profit_margin: 87.5,
+          category_id: '1',
+          category_name: 'Bulking',
+          stock_quantity: 120,
+          sold_count: 38,
+          is_active: true
+        }
+      ]
+    }),
+    create: async (product) => ({ id: 'new-id', message: 'Product created' }),
+    update: async (id, product) => ({ message: 'Product updated' }),
+    delete: async (id) => ({ message: 'Product deleted' })
+  },
+  categories: {
+    getAll: async () => ({
+      categories: [
+        { _id: '1', name: 'Bulking', emoji: '💪' },
+        { _id: '2', name: 'Cutting', emoji: '✂️' },
+        { _id: '3', name: 'PCT', emoji: '🛡️' }
+      ]
+    })
+  }
+};
+
+// Use mock API if real API not available
+const productsAPI = window.productsAPI || mockAPI.products;
+const categoriesAPI = window.categoriesAPI || mockAPI.categories;
 
 const Products = () => {
   const [products, setProducts] = useState([]);
@@ -13,6 +66,7 @@ const Products = () => {
     name: '',
     description: '',
     price_usdt: '',
+    purchase_price_usdt: '',
     category_id: '',
     stock_quantity: 999
   });
@@ -47,7 +101,15 @@ const Products = () => {
       return false;
     }
     if (!formData.price_usdt || formData.price_usdt <= 0) {
-      setFormError('Price must be greater than 0');
+      setFormError('Selling price must be greater than 0');
+      return false;
+    }
+    if (!formData.purchase_price_usdt || formData.purchase_price_usdt <= 0) {
+      setFormError('Purchase price must be greater than 0');
+      return false;
+    }
+    if (parseFloat(formData.purchase_price_usdt) >= parseFloat(formData.price_usdt)) {
+      setFormError('Selling price must be higher than purchase price');
       return false;
     }
     if (formData.price_usdt > 99999) {
@@ -60,6 +122,14 @@ const Products = () => {
     }
     setFormError('');
     return true;
+  };
+
+  const calculateProfitMetrics = () => {
+    const selling = parseFloat(formData.price_usdt) || 0;
+    const purchase = parseFloat(formData.purchase_price_usdt) || 0;
+    const profit = selling - purchase;
+    const margin = purchase > 0 ? ((profit / purchase) * 100) : 0;
+    return { profit, margin };
   };
 
   const handleSubmit = async (e) => {
@@ -104,6 +174,7 @@ const Products = () => {
       name: product.name,
       description: product.description,
       price_usdt: product.price_usdt,
+      purchase_price_usdt: product.purchase_price_usdt || '',
       category_id: product.category_id || '',
       stock_quantity: product.stock_quantity || 999
     });
@@ -116,6 +187,7 @@ const Products = () => {
       name: '',
       description: '',
       price_usdt: '',
+      purchase_price_usdt: '',
       category_id: categories.length > 0 ? categories[0]._id : '',
       stock_quantity: 999
     });
@@ -132,6 +204,15 @@ const Products = () => {
   const filteredProducts = selectedCategory === 'all'
       ? products
       : products.filter(p => p.category_id === selectedCategory);
+
+  // Calculate total profit potential
+  const totalPotentialProfit = filteredProducts.reduce((sum, product) => {
+    return sum + (product.profit_usdt * product.stock_quantity);
+  }, 0);
+
+  const totalRealizedProfit = filteredProducts.reduce((sum, product) => {
+    return sum + (product.profit_usdt * (product.sold_count || 0));
+  }, 0);
 
   if (loading) {
     return <div className="loading">Loading products...</div>;
@@ -152,11 +233,38 @@ const Products = () => {
     );
   }
 
+  const { profit: currentProfit, margin: currentMargin } = calculateProfitMetrics();
+
   return (
       <div className="products-section">
         <div className="section-header">
           <h2>Products ({filteredProducts.length})</h2>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {/* Profit Summary */}
+            <div style={{
+              display: 'flex',
+              gap: '15px',
+              padding: '10px 20px',
+              background: '#2a2a2a',
+              borderRadius: '10px',
+              marginRight: '20px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <TrendingUp size={16} style={{ color: '#00c896' }} />
+                <span style={{ fontSize: '12px', color: '#888' }}>Realized:</span>
+                <span style={{ fontSize: '14px', color: '#00c896', fontWeight: 'bold' }}>
+                  ${formatPrice(totalRealizedProfit)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <DollarSign size={16} style={{ color: '#667eea' }} />
+                <span style={{ fontSize: '12px', color: '#888' }}>Potential:</span>
+                <span style={{ fontSize: '14px', color: '#667eea', fontWeight: 'bold' }}>
+                  ${formatPrice(totalPotentialProfit)}
+                </span>
+              </div>
+            </div>
+
             <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
@@ -230,16 +338,57 @@ const Products = () => {
                   ))}
                 </select>
 
-                <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    max="99999"
-                    placeholder="Price (USDT)"
-                    value={formData.price_usdt}
-                    onChange={(e) => setFormData({...formData, price_usdt: e.target.value})}
-                    required
-                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max="99999"
+                      placeholder="Purchase Price (Cost) USDT"
+                      value={formData.purchase_price_usdt}
+                      onChange={(e) => setFormData({...formData, purchase_price_usdt: e.target.value})}
+                      required
+                      style={{ background: '#1a1a1a' }}
+                  />
+
+                  <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max="99999"
+                      placeholder="Selling Price USDT"
+                      value={formData.price_usdt}
+                      onChange={(e) => setFormData({...formData, price_usdt: e.target.value})}
+                      required
+                      style={{ background: '#1a1a1a' }}
+                  />
+                </div>
+
+                {/* Live Profit Calculator */}
+                {formData.price_usdt && formData.purchase_price_usdt && (
+                    <div style={{
+                      padding: '15px',
+                      background: 'linear-gradient(135deg, rgba(0, 200, 150, 0.1) 0%, rgba(102, 126, 234, 0.1) 100%)',
+                      borderRadius: '10px',
+                      border: '1px solid #3a3a3a',
+                      margin: '10px 0'
+                    }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <span style={{ fontSize: '12px', color: '#888' }}>Profit per Unit:</span>
+                          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#00c896' }}>
+                            ${formatPrice(currentProfit)}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '12px', color: '#888' }}>Profit Margin:</span>
+                          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#667eea' }}>
+                            {formatPrice(currentMargin)}%
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                )}
 
                 <input
                     type="number"
@@ -305,25 +454,56 @@ const Products = () => {
                         borderRadius: '20px',
                         fontSize: '12px'
                       }}>
-                  {product.category_name || 'Uncategorized'}
-                </span>
+                        {product.category_name || 'Uncategorized'}
+                      </span>
                     </div>
                     <p className="product-desc">{product.description}</p>
-                    <div className="product-info">
-                      <span className="price">${formatPrice(product.price_usdt)}</span>
-                      <div>
-                        <span className="sold">Sold: {product.sold_count || 0}</span>
-                        {product.stock_quantity < 10 && (
-                            <span style={{
-                              marginLeft: '10px',
-                              color: '#ff6b6b',
-                              fontWeight: 'bold'
-                            }}>
-                      Low Stock: {product.stock_quantity}
-                    </span>
-                        )}
+
+                    {/* Pricing and Profit Info */}
+                    <div style={{
+                      background: '#2a2a2a',
+                      borderRadius: '10px',
+                      padding: '10px',
+                      marginBottom: '15px'
+                    }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <span style={{ fontSize: '11px', color: '#888' }}>Cost:</span>
+                          <div style={{ color: '#ff6b6b' }}>${formatPrice(product.purchase_price_usdt)}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '11px', color: '#888' }}>Sell:</span>
+                          <div style={{ color: '#00c896', fontWeight: 'bold' }}>${formatPrice(product.price_usdt)}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '11px', color: '#888' }}>Profit:</span>
+                          <div style={{ color: '#667eea' }}>${formatPrice(product.profit_usdt)}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '11px', color: '#888' }}>Margin:</span>
+                          <div style={{ color: '#ffa500' }}>{formatPrice(product.profit_margin)}%</div>
+                        </div>
                       </div>
                     </div>
+
+                    <div className="product-info">
+                      <div>
+                        <span className="sold">Sold: {product.sold_count || 0}</span>
+                        <span style={{ marginLeft: '10px', color: '#00c896', fontSize: '12px' }}>
+                          (${formatPrice((product.profit_usdt || 0) * (product.sold_count || 0))} profit)
+                        </span>
+                      </div>
+                      {product.stock_quantity < 10 && (
+                          <span style={{
+                            color: '#ff6b6b',
+                            fontWeight: 'bold',
+                            fontSize: '12px'
+                          }}>
+                            Low: {product.stock_quantity}
+                          </span>
+                      )}
+                    </div>
+
                     <div className="product-actions">
                       <button onClick={() => handleEdit(product)} className="btn-edit">
                         <Edit size={16} /> Edit

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 from bson import ObjectId
 import secrets
@@ -15,7 +15,7 @@ import logging
 # Load environment variables
 load_dotenv('/opt/telegram-shop-bot/.env')
 
-app = FastAPI(title="AnabolicPizza API - Enhanced with VIP")
+app = FastAPI(title="AnabolicPizza API - Enhanced Dashboard & Profit Tracking")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,7 +56,8 @@ class CategoryModel(BaseModel):
 class ProductModel(BaseModel):
     name: str
     description: str
-    price_usdt: float
+    price_usdt: float  # Selling price
+    purchase_price_usdt: float  # Purchase/cost price
     category_id: Optional[str] = None
     stock_quantity: int = 999
     is_active: bool = True
@@ -118,7 +119,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 # Routes
 @app.get("/")
 async def root():
-    return {"status": "AnabolicPizza API", "version": "3.0", "features": ["categories", "referrals", "vip"]}
+    return {"status": "AnabolicPizza API", "version": "4.0", "features": ["categories", "referrals", "vip", "profit_tracking"]}
 
 @app.post("/api/auth/login")
 async def login(login_data: LoginModel):
@@ -189,7 +190,7 @@ async def delete_category(category_id: str, email: str = Depends(verify_token)):
     
     return {"message": "Category deleted"}
 
-# ENHANCED PRODUCT ENDPOINTS
+# ENHANCED PRODUCT ENDPOINTS WITH PROFIT TRACKING
 @app.get("/api/products")
 async def get_products(skip: int = 0, limit: int = 100, category_id: Optional[str] = None):
     query = {}
@@ -201,6 +202,17 @@ async def get_products(skip: int = 0, limit: int = 100, category_id: Optional[st
     for product in products:
         product["_id"] = str(product["_id"])
         product["price_usdt"] = format_price(product.get("price_usdt"))
+        product["purchase_price_usdt"] = format_price(product.get("purchase_price_usdt", 0))
+        
+        # Calculate profit margin
+        selling_price = product["price_usdt"]
+        purchase_price = product["purchase_price_usdt"]
+        if purchase_price > 0:
+            product["profit_usdt"] = format_price(selling_price - purchase_price)
+            product["profit_margin"] = format_price(((selling_price - purchase_price) / purchase_price) * 100)
+        else:
+            product["profit_usdt"] = format_price(selling_price)
+            product["profit_margin"] = 100.0
         
         # Get category name
         if product.get("category_id"):
@@ -217,6 +229,7 @@ async def get_products(skip: int = 0, limit: int = 100, category_id: Optional[st
 async def create_product(product: ProductModel, email: str = Depends(verify_token)):
     product_dict = product.dict()
     product_dict["price_usdt"] = format_price(product_dict["price_usdt"])
+    product_dict["purchase_price_usdt"] = format_price(product_dict.get("purchase_price_usdt", 0))
     product_dict["created_at"] = datetime.utcnow()
     product_dict["sold_count"] = 0
     
@@ -231,6 +244,7 @@ async def create_product(product: ProductModel, email: str = Depends(verify_toke
 async def update_product(product_id: str, product: ProductModel, email: str = Depends(verify_token)):
     product_dict = product.dict()
     product_dict["price_usdt"] = format_price(product_dict["price_usdt"])
+    product_dict["purchase_price_usdt"] = format_price(product_dict.get("purchase_price_usdt", 0))
     product_dict["updated_at"] = datetime.utcnow()
     
     # Convert category_id to ObjectId
@@ -318,7 +332,7 @@ async def delete_referral(referral_id: str, email: str = Depends(verify_token)):
     
     return {"message": "Referral code deleted"}
 
-# ENHANCED ORDER ENDPOINTS
+# ENHANCED ORDER ENDPOINTS WITH PROFIT CALCULATION
 @app.get("/api/orders")
 async def get_orders(skip: int = 0, limit: int = 100):
     orders = await db.orders.find({}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
@@ -327,6 +341,23 @@ async def get_orders(skip: int = 0, limit: int = 100):
         order["_id"] = str(order["_id"])
         order["total_usdt"] = format_price(order.get("total_usdt"))
         
+        # Calculate profit for each order
+        total_profit = 0
+        if order.get("items"):
+            for item in order["items"]:
+                item["price_usdt"] = format_price(item.get("price_usdt"))
+                item["subtotal_usdt"] = format_price(item.get("subtotal_usdt"))
+                
+                # Get product to calculate profit
+                product = await db.products.find_one({"name": item["product_name"]})
+                if product:
+                    purchase_price = product.get("purchase_price_usdt", 0)
+                    selling_price = item["price_usdt"]
+                    item_profit = (selling_price - purchase_price) * item["quantity"]
+                    total_profit += item_profit
+        
+        order["profit_usdt"] = format_price(total_profit)
+        
         # Generate order number if missing
         if not order.get("order_number"):
             order["order_number"] = generate_order_id()
@@ -334,12 +365,6 @@ async def get_orders(skip: int = 0, limit: int = 100):
                 {"_id": ObjectId(order["_id"])},
                 {"$set": {"order_number": order["order_number"]}}
             )
-        
-        # Format item prices
-        if order.get("items"):
-            for item in order["items"]:
-                item["price_usdt"] = format_price(item.get("price_usdt"))
-                item["subtotal_usdt"] = format_price(item.get("subtotal_usdt"))
         
         # Add referral info
         if order.get("referral_code"):
@@ -526,7 +551,7 @@ async def get_vip_users(email: str = Depends(verify_token)):
     
     return {"vip_users": vip_users, "total": len(vip_users)}
 
-# DASHBOARD STATS
+# ENHANCED DASHBOARD STATS WITH PROFIT DATA
 @app.get("/api/dashboard/stats")
 async def get_stats():
     total_orders = await db.orders.count_documents({})
@@ -534,13 +559,27 @@ async def get_stats():
     total_products = await db.products.count_documents({"is_active": True})
     total_categories = await db.categories.count_documents({"is_active": True})
     
-    # Calculate revenue
+    # Calculate revenue and profit
     pipeline = [
         {"$match": {"status": {"$in": ["paid", "completed"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$total_usdt"}}}
     ]
     revenue_result = await db.orders.aggregate(pipeline).to_list(1)
     total_revenue = format_price(revenue_result[0]["total"] if revenue_result else 0)
+    
+    # Calculate total profit
+    total_profit = 0
+    paid_orders = await db.orders.find({"status": {"$in": ["paid", "completed"]}}).to_list(None)
+    
+    for order in paid_orders:
+        if order.get("items"):
+            for item in order["items"]:
+                product = await db.products.find_one({"name": item["product_name"]})
+                if product:
+                    purchase_price = product.get("purchase_price_usdt", 0)
+                    selling_price = item.get("price_usdt", 0)
+                    item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
+                    total_profit += item_profit
     
     # Get active referral codes
     active_referrals = await db.referral_codes.count_documents({"is_active": True})
@@ -554,16 +593,153 @@ async def get_stats():
         ]
     })
     
+    # Get today's stats
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_orders = await db.orders.count_documents({
+        "created_at": {"$gte": today_start},
+        "status": {"$in": ["paid", "completed"]}
+    })
+    
+    today_revenue_result = await db.orders.aggregate([
+        {"$match": {"created_at": {"$gte": today_start}, "status": {"$in": ["paid", "completed"]}}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_usdt"}}}
+    ]).to_list(1)
+    today_revenue = format_price(today_revenue_result[0]["total"] if today_revenue_result else 0)
+    
+    # Get pending orders count
+    pending_orders = await db.orders.count_documents({"status": "pending"})
+    
+    # Calculate average order value
+    avg_order_value = format_price(total_revenue / total_orders if total_orders > 0 else 0)
+    
+    # Get top selling products
+    top_products = await db.products.find({"sold_count": {"$gt": 0}}).sort("sold_count", -1).limit(5).to_list(5)
+    for product in top_products:
+        product["_id"] = str(product["_id"])
+        product["price_usdt"] = format_price(product.get("price_usdt", 0))
+        product["purchase_price_usdt"] = format_price(product.get("purchase_price_usdt", 0))
+    
     return {
         "stats": {
             "total_orders": total_orders,
             "total_revenue_usdt": total_revenue,
+            "total_profit_usdt": format_price(total_profit),
+            "profit_margin": format_price((total_profit / total_revenue * 100) if total_revenue > 0 else 0),
             "total_users": total_users,
             "total_products": total_products,
             "total_categories": total_categories,
             "active_referrals": active_referrals,
-            "vip_users": vip_users
+            "vip_users": vip_users,
+            "today_orders": today_orders,
+            "today_revenue": today_revenue,
+            "pending_orders": pending_orders,
+            "avg_order_value": avg_order_value,
+            "top_products": top_products
         }
+    }
+
+# SALES ANALYTICS ENDPOINT
+@app.get("/api/dashboard/analytics")
+async def get_analytics(days: int = 30):
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=days)
+    
+    # Get daily sales data
+    pipeline = [
+        {
+            "$match": {
+                "created_at": {"$gte": start_date, "$lte": end_date},
+                "status": {"$in": ["paid", "completed"]}
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%d",
+                        "date": "$created_at"
+                    }
+                },
+                "revenue": {"$sum": "$total_usdt"},
+                "orders": {"$sum": 1}
+            }
+        },
+        {"$sort": {"_id": 1}}
+    ]
+    
+    daily_sales = await db.orders.aggregate(pipeline).to_list(None)
+    
+    # Calculate daily profit
+    for day in daily_sales:
+        day_profit = 0
+        day_orders = await db.orders.find({
+            "created_at": {
+                "$gte": datetime.strptime(day["_id"], "%Y-%m-%d"),
+                "$lt": datetime.strptime(day["_id"], "%Y-%m-%d") + timedelta(days=1)
+            },
+            "status": {"$in": ["paid", "completed"]}
+        }).to_list(None)
+        
+        for order in day_orders:
+            if order.get("items"):
+                for item in order["items"]:
+                    product = await db.products.find_one({"name": item["product_name"]})
+                    if product:
+                        purchase_price = product.get("purchase_price_usdt", 0)
+                        selling_price = item.get("price_usdt", 0)
+                        item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
+                        day_profit += item_profit
+        
+        day["profit"] = format_price(day_profit)
+        day["revenue"] = format_price(day["revenue"])
+    
+    # Get sales by category
+    category_sales = []
+    categories = await db.categories.find({"is_active": True}).to_list(None)
+    
+    for category in categories:
+        category_products = await db.products.find({"category_id": category["_id"]}).to_list(None)
+        category_revenue = 0
+        category_quantity = 0
+        
+        for product in category_products:
+            category_quantity += product.get("sold_count", 0)
+            category_revenue += product.get("price_usdt", 0) * product.get("sold_count", 0)
+        
+        if category_revenue > 0:
+            category_sales.append({
+                "name": category["name"],
+                "emoji": category.get("emoji", "📦"),
+                "revenue": format_price(category_revenue),
+                "quantity": category_quantity
+            })
+    
+    # Sort by revenue
+    category_sales.sort(key=lambda x: x["revenue"], reverse=True)
+    
+    # Get hourly distribution (last 7 days)
+    hourly_pipeline = [
+        {
+            "$match": {
+                "created_at": {"$gte": end_date - timedelta(days=7)},
+                "status": {"$in": ["paid", "completed"]}
+            }
+        },
+        {
+            "$group": {
+                "_id": {"$hour": "$created_at"},
+                "count": {"$sum": 1}
+            }
+        },
+        {"$sort": {"_id": 1}}
+    ]
+    
+    hourly_distribution = await db.orders.aggregate(hourly_pipeline).to_list(None)
+    
+    return {
+        "daily_sales": daily_sales,
+        "category_sales": category_sales[:5],  # Top 5 categories
+        "hourly_distribution": hourly_distribution
     }
 
 # Admin utility endpoints
