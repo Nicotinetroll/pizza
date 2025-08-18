@@ -725,6 +725,391 @@ async def get_analytics(days: int = 30):
         "hourly_distribution": hourly_distribution
     }
 
+
+# ================== SELLER REFERRAL SYSTEM ==================
+
+class SellerModel(BaseModel):
+    name: str
+    telegram_username: str
+    commission_percentage: float = 30.0
+    is_active: bool = True
+    payout_address: Optional[str] = None  # Crypto address for payouts
+    notes: Optional[str] = None
+
+class PayoutModel(BaseModel):
+    amount: float
+    payment_method: str = "USDT"
+    transaction_id: Optional[str] = None
+    notes: Optional[str] = None
+
+# SELLER ENDPOINTS
+@app.get("/api/sellers")
+async def get_sellers(email: str = Depends(verify_token)):
+    """Get all sellers with their stats"""
+    sellers = await db.sellers.find({}).to_list(100)
+    
+    for seller in sellers:
+        seller["_id"] = str(seller["_id"])
+        
+        # Calculate earnings from referral codes
+        referral_codes = await db.referral_codes.find({
+            "seller_id": seller["_id"]
+        }).to_list(100)
+        
+        seller["referral_codes"] = []
+        total_earnings = 0
+        pending_earnings = 0
+        total_orders = 0
+        
+        for code in referral_codes:
+            code["_id"] = str(code["_id"])
+            
+            # Get orders that used this code
+            orders = await db.orders.find({
+                "referral_code": code["code"],
+                "status": {"$in": ["paid", "completed"]}
+            }).to_list(1000)
+            
+            code_earnings = 0
+            for order in orders:
+                # Calculate profit for this order
+                profit = 0
+                if order.get("items"):
+                    for item in order["items"]:
+                        product = await db.products.find_one({"name": item["product_name"]})
+                        if product:
+                            purchase_price = product.get("purchase_price_usdt", 0)
+                            selling_price = item.get("price_usdt", 0)
+                            item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
+                            profit += item_profit
+                
+                # Calculate seller commission
+                commission = profit * (seller.get("commission_percentage", 30) / 100)
+                code_earnings += commission
+                total_orders += 1
+            
+            code["total_earnings"] = format_price(code_earnings)
+            code["uses"] = len(orders)
+            seller["referral_codes"].append({
+                "code": code["code"],
+                "earnings": format_price(code_earnings),
+                "uses": len(orders)
+            })
+            
+            total_earnings += code_earnings
+        
+        # Get pending earnings (not yet paid out)
+        payouts = await db.seller_payouts.find({
+            "seller_id": seller["_id"]
+        }).to_list(100)
+        
+        total_paid = sum(p.get("amount", 0) for p in payouts)
+        pending_earnings = total_earnings - total_paid
+        
+        seller["total_earnings"] = format_price(total_earnings)
+        seller["pending_earnings"] = format_price(pending_earnings)
+        seller["total_paid"] = format_price(total_paid)
+        seller["total_orders"] = total_orders
+        seller["created_at"] = seller.get("created_at", datetime.utcnow())
+    
+    return {"sellers": sellers, "total": len(sellers)}
+
+@app.post("/api/sellers")
+async def create_seller(seller: SellerModel, email: str = Depends(verify_token)):
+    """Create new seller"""
+    seller_dict = seller.dict()
+    seller_dict["created_at"] = datetime.utcnow()
+    seller_dict["created_by"] = email
+    seller_dict["total_earnings"] = 0
+    seller_dict["pending_earnings"] = 0
+    
+    result = await db.sellers.insert_one(seller_dict)
+    
+    # Log action
+    await db.audit_logs.insert_one({
+        "admin_id": email,
+        "action": "CREATE_SELLER",
+        "entity_type": "seller",
+        "entity_id": result.inserted_id,
+        "timestamp": datetime.utcnow()
+    })
+    
+    return {"id": str(result.inserted_id), "message": "Seller created successfully"}
+
+@app.put("/api/sellers/{seller_id}")
+async def update_seller(
+    seller_id: str, 
+    seller: SellerModel, 
+    email: str = Depends(verify_token)
+):
+    """Update seller details"""
+    seller_dict = seller.dict()
+    seller_dict["updated_at"] = datetime.utcnow()
+    
+    result = await db.sellers.update_one(
+        {"_id": ObjectId(seller_id)},
+        {"$set": seller_dict}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    
+    return {"message": "Seller updated successfully"}
+
+@app.delete("/api/sellers/{seller_id}")
+async def delete_seller(seller_id: str, email: str = Depends(verify_token)):
+    """Delete seller (soft delete - just deactivate)"""
+    result = await db.sellers.update_one(
+        {"_id": ObjectId(seller_id)},
+        {"$set": {"is_active": False, "deleted_at": datetime.utcnow()}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    
+    return {"message": "Seller deactivated"}
+
+# ASSIGN REFERRAL CODE TO SELLER
+@app.post("/api/referrals/{referral_id}/assign-seller")
+async def assign_seller_to_referral(
+    referral_id: str,
+    seller_id: str,
+    email: str = Depends(verify_token)
+):
+    """Assign a referral code to a seller"""
+    # Check if seller exists
+    seller = await db.sellers.find_one({"_id": ObjectId(seller_id)})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    
+    # Update referral code
+    result = await db.referral_codes.update_one(
+        {"_id": ObjectId(referral_id)},
+        {
+            "$set": {
+                "seller_id": seller_id,
+                "seller_name": seller["name"],
+                "commission_percentage": seller.get("commission_percentage", 30),
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Referral code not found")
+    
+    return {"message": "Seller assigned to referral code"}
+
+# SELLER EARNINGS & PAYOUTS
+@app.get("/api/sellers/{seller_id}/earnings")
+async def get_seller_earnings(seller_id: str, email: str = Depends(verify_token)):
+    """Get detailed earnings for a seller"""
+    seller = await db.sellers.find_one({"_id": ObjectId(seller_id)})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    
+    # Get all referral codes for this seller
+    referral_codes = await db.referral_codes.find({
+        "seller_id": seller_id
+    }).to_list(100)
+    
+    earnings_details = []
+    total_earnings = 0
+    
+    for code in referral_codes:
+        # Get all orders using this code
+        orders = await db.orders.find({
+            "referral_code": code["code"],
+            "status": {"$in": ["paid", "completed"]}
+        }).sort("created_at", -1).to_list(100)
+        
+        for order in orders:
+            # Calculate profit
+            profit = 0
+            if order.get("items"):
+                for item in order["items"]:
+                    product = await db.products.find_one({"name": item["product_name"]})
+                    if product:
+                        purchase_price = product.get("purchase_price_usdt", 0)
+                        selling_price = item.get("price_usdt", 0)
+                        item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
+                        profit += item_profit
+            
+            # Calculate commission
+            commission = profit * (seller.get("commission_percentage", 30) / 100)
+            total_earnings += commission
+            
+            earnings_details.append({
+                "order_id": str(order["_id"]),
+                "order_number": order.get("order_number"),
+                "date": order.get("created_at"),
+                "order_total": format_price(order.get("total_usdt", 0)),
+                "order_profit": format_price(profit),
+                "commission_rate": seller.get("commission_percentage", 30),
+                "commission_earned": format_price(commission),
+                "referral_code": code["code"],
+                "status": order.get("status")
+            })
+    
+    # Get payout history
+    payouts = await db.seller_payouts.find({
+        "seller_id": seller_id
+    }).sort("created_at", -1).to_list(100)
+    
+    for payout in payouts:
+        payout["_id"] = str(payout["_id"])
+    
+    total_paid = sum(p.get("amount", 0) for p in payouts)
+    pending = total_earnings - total_paid
+    
+    return {
+        "seller": {
+            "_id": str(seller["_id"]),
+            "name": seller["name"],
+            "commission_percentage": seller.get("commission_percentage", 30)
+        },
+        "earnings": earnings_details,
+        "summary": {
+            "total_earnings": format_price(total_earnings),
+            "total_paid": format_price(total_paid),
+            "pending_payout": format_price(pending),
+            "total_orders": len(earnings_details)
+        },
+        "payout_history": payouts
+    }
+
+@app.post("/api/sellers/{seller_id}/payout")
+async def create_payout(
+    seller_id: str,
+    payout: PayoutModel,
+    email: str = Depends(verify_token)
+):
+    """Create a payout for seller"""
+    seller = await db.sellers.find_one({"_id": ObjectId(seller_id)})
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    
+    # Calculate current pending amount
+    earnings = await get_seller_earnings(seller_id, email)
+    pending = float(earnings["summary"]["pending_payout"])
+    
+    if payout.amount > pending:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Payout amount exceeds pending earnings (${pending:.2f})"
+        )
+    
+    # Create payout record
+    payout_dict = payout.dict()
+    payout_dict["seller_id"] = seller_id
+    payout_dict["seller_name"] = seller["name"]
+    payout_dict["created_at"] = datetime.utcnow()
+    payout_dict["created_by"] = email
+    payout_dict["status"] = "completed"
+    
+    result = await db.seller_payouts.insert_one(payout_dict)
+    
+    # Log action
+    await db.audit_logs.insert_one({
+        "admin_id": email,
+        "action": "SELLER_PAYOUT",
+        "entity_type": "seller",
+        "entity_id": ObjectId(seller_id),
+        "details": {
+            "amount": payout.amount,
+            "method": payout.payment_method
+        },
+        "timestamp": datetime.utcnow()
+    })
+    
+    return {
+        "id": str(result.inserted_id),
+        "message": f"Payout of ${payout.amount:.2f} created successfully",
+        "new_pending": format_price(pending - payout.amount)
+    }
+
+@app.get("/api/sellers/{seller_id}/referral-codes")
+async def get_seller_referral_codes(seller_id: str, email: str = Depends(verify_token)):
+    """Get all referral codes assigned to a seller"""
+    codes = await db.referral_codes.find({
+        "seller_id": seller_id
+    }).to_list(100)
+    
+    for code in codes:
+        code["_id"] = str(code["_id"])
+        
+        # Count uses
+        orders = await db.orders.count_documents({
+            "referral_code": code["code"],
+            "status": {"$in": ["paid", "completed"]}
+        })
+        code["total_uses"] = orders
+    
+    return {"codes": codes, "total": len(codes)}
+
+# SELLER STATISTICS
+@app.get("/api/sellers/stats")
+async def get_sellers_stats(email: str = Depends(verify_token)):
+    """Get overall seller program statistics"""
+    total_sellers = await db.sellers.count_documents({"is_active": True})
+    
+    # Calculate total commissions
+    all_sellers = await db.sellers.find({}).to_list(100)
+    total_earnings = 0
+    total_pending = 0
+    
+    for seller in all_sellers:
+        seller_id = str(seller["_id"])
+        earnings = await get_seller_earnings(seller_id, email)
+        total_earnings += float(earnings["summary"]["total_earnings"])
+        total_pending += float(earnings["summary"]["pending_payout"])
+    
+    # Get this month's payouts
+    month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0)
+    monthly_payouts = await db.seller_payouts.aggregate([
+        {"$match": {"created_at": {"$gte": month_start}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    
+    return {
+        "total_sellers": total_sellers,
+        "total_earnings": format_price(total_earnings),
+        "total_pending": format_price(total_pending),
+        "monthly_payouts": format_price(monthly_payouts[0]["total"] if monthly_payouts else 0),
+        "top_sellers": await get_top_sellers()
+    }
+
+async def get_top_sellers():
+    """Helper to get top performing sellers"""
+    sellers = await db.sellers.find({"is_active": True}).to_list(100)
+    seller_earnings = []
+    
+    for seller in sellers:
+        earnings = 0
+        codes = await db.referral_codes.find({"seller_id": str(seller["_id"])}).to_list(100)
+        
+        for code in codes:
+            orders = await db.orders.find({
+                "referral_code": code["code"],
+                "status": {"$in": ["paid", "completed"]}
+            }).to_list(100)
+            
+            for order in orders:
+                # Calculate profit (simplified)
+                profit = order.get("total_usdt", 0) * 0.5  # Assume 50% profit margin
+                commission = profit * (seller.get("commission_percentage", 30) / 100)
+                earnings += commission
+        
+        if earnings > 0:
+            seller_earnings.append({
+                "name": seller["name"],
+                "earnings": format_price(earnings)
+            })
+    
+    # Sort by earnings and return top 5
+    seller_earnings.sort(key=lambda x: float(x["earnings"]), reverse=True)
+    return seller_earnings[:5]
+
 # NOTIFICATION SETTINGS ENDPOINTS
 @app.get("/api/notifications/settings")
 async def get_notification_settings(email: str = Depends(verify_token)):
