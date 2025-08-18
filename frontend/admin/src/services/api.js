@@ -537,7 +537,91 @@ export const statsAPI = {
 
 };
 
+// Sellers API
+export const sellersAPI = {
+  getAll: async () => {
+    const response = await api.get('/sellers');
+    return response.data;
+  },
 
+  create: async (seller) => {
+    if (!seller.name || !seller.telegram_username) {
+      throw new Error('Missing required fields');
+    }
+
+    if (seller.commission_percentage < 0 || seller.commission_percentage > 100) {
+      throw new Error('Commission must be between 0-100%');
+    }
+
+    const response = await api.post('/sellers', seller);
+    return response.data;
+  },
+
+  update: async (id, seller) => {
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid seller ID');
+    }
+
+    const response = await api.put(`/sellers/${id}`, seller);
+    return response.data;
+  },
+
+  delete: async (id) => {
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid seller ID');
+    }
+
+    const response = await api.delete(`/sellers/${id}`);
+    return response.data;
+  },
+
+  getEarnings: async (sellerId) => {
+    if (!sellerId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid seller ID');
+    }
+
+    const response = await api.get(`/sellers/${sellerId}/earnings`);
+    return response.data;
+  },
+
+  createPayout: async (sellerId, payout) => {
+    if (!sellerId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid seller ID');
+    }
+
+    if (!payout.amount || payout.amount <= 0) {
+      throw new Error('Invalid payout amount');
+    }
+
+    const response = await api.post(`/sellers/${sellerId}/payout`, payout);
+    return response.data;
+  },
+
+  getReferralCodes: async (sellerId) => {
+    if (!sellerId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid seller ID');
+    }
+
+    const response = await api.get(`/sellers/${sellerId}/referral-codes`);
+    return response.data;
+  },
+
+  assignReferralCode: async (referralId, sellerId) => {
+    if (!referralId.match(/^[0-9a-fA-F]{24}$/) || !sellerId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid ID format');
+    }
+
+    const response = await api.post(`/referrals/${referralId}/assign-seller`, null, {
+      params: { seller_id: sellerId }
+    });
+    return response.data;
+  },
+
+  getStats: async () => {
+    const response = await api.get('/sellers/stats');
+    return response.data;
+  }
+};
 
 export const adminAPI = {
 
@@ -600,4 +684,3 @@ export const notificationsAPI = {
 };
 
 export default api;
-
