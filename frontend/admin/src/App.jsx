@@ -45,17 +45,17 @@ const SecurityStatus = () => {
       setEncryptionKey(key);
     }, 3000);
 
-    // Rotate status text
+    // Rotate status text with encrypted hacker-style strings
     const statuses = [
-      'AES-256-GCM ACTIVE',
-      'FIREWALL: ENABLED',
-      'SSL/TLS: SECURED',
-      'INTRUSION: BLOCKED',
-      'AUTH: VERIFIED',
-      'QUANTUM SAFE: ON',
-      'DDOS: PROTECTED',
-      'WAF: ACTIVE',
-      'IDS: MONITORING'
+      'XK9#mN2$vP8@fL5*qR7!wT3&dG6',
+      '0xDEADBEEF#7F3A9C2E$8B4D6A1F',
+      'SHA256:aF9$kL2#mN8*pQ5!vX3&zB7',
+      '::ffff:192.168.1.1#SECURE$NODE',
+      'QUANTUM#X25519$ECDHE&RSA4096',
+      'TOR:6nB8#kP3$mQ9*xV2!fL5&wR7',
+      '0xFF00AA55$KERNEL#HARDENED&64',
+      'AES512:GCM$POLY1305#CHACHA20',
+      'IPTABLES#DROP$0x7FFF&SHIELD::ON'
     ];
     
     let statusIndex = 0;
@@ -228,9 +228,9 @@ const MainApp = () => {
 
             <Separator size="4" style={{ opacity: 0.1, marginBottom: '24px' }} />
 
-            {/* Navigation */}
+            {/* Navigation with increased spacing */}
             <Box style={{ flex: 1 }}>
-              <Flex direction="column" gap="2">
+              <Flex direction="column" gap="3">
                 {navigationItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
@@ -260,7 +260,9 @@ const MainApp = () => {
                             position: 'relative',
                             overflow: 'hidden',
                             transition: 'all 0.3s ease',
-                            paddingLeft: isActive ? '20px' : '12px'
+                            paddingLeft: isActive ? '20px' : '12px',
+                            paddingTop: '12px',
+                            paddingBottom: '12px'
                           }}
                         >
                           {isActive && (
@@ -284,8 +286,8 @@ const MainApp = () => {
                               }}
                             />
                           )}
-                          <Flex align="center" gap="3">
-                            <Icon width="18" height="18" />
+                          <Flex align="center" gap="3" style={{ width: '100%' }}>
+                            <Icon width="18" height="18" style={{ flexShrink: 0 }} />
                             <Text size="2" weight={isActive ? 'medium' : 'regular'}>
                               {item.label}
                             </Text>
@@ -375,26 +377,23 @@ const MainApp = () => {
                   )}
                 </IconButton>
 
-                <Flex align="center" gap="2">
+                <Flex align="center" gap="3">
                   <Text size="5" weight="bold">
                     {navigationItems.find(item => item.id === activeTab)?.label}
                   </Text>
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                  >
+                  {/* Static icon - NO ROTATION */}
+                  <Box style={{ opacity: 0.6 }}>
                     {React.createElement(
                       navigationItems.find(item => item.id === activeTab)?.icon || DashboardIcon,
                       { 
                         width: "20", 
                         height: "20",
                         style: { 
-                          color: navigationItems.find(item => item.id === activeTab)?.color,
-                          opacity: 0.6
+                          color: navigationItems.find(item => item.id === activeTab)?.color
                         }
                       }
                     )}
-                  </motion.div>
+                  </Box>
                 </Flex>
               </Flex>
 
@@ -459,7 +458,7 @@ const MainApp = () => {
                   transition={{ duration: 0.3 }}
                 >
                   <Box style={{ padding: '16px' }}>
-                    <Flex direction="column" gap="2">
+                    <Flex direction="column" gap="3">
                       {navigationItems.map((item) => {
                         const Icon = item.icon;
                         const isActive = activeTab === item.id;
@@ -468,7 +467,7 @@ const MainApp = () => {
                           <Button
                             key={item.id}
                             variant={isActive ? 'soft' : 'ghost'}
-                            size="2"
+                            size="3"
                             onClick={() => setActiveTab(item.id)}
                             style={{
                               width: '100%',
@@ -478,9 +477,11 @@ const MainApp = () => {
                                 : 'transparent',
                               border: isActive ? `1px solid ${item.color}40` : '1px solid transparent',
                               color: isActive ? item.color : 'rgba(255, 255, 255, 0.7)',
+                              paddingTop: '12px',
+                              paddingBottom: '12px'
                             }}
                           >
-                            <Flex align="center" gap="2">
+                            <Flex align="center" gap="3">
                               <Icon width="16" height="16" />
                               <Text size="2">{item.label}</Text>
                             </Flex>

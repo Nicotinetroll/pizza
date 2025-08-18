@@ -2,18 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Box, Flex, Grid, Text, Card, Badge, Button, Select, 
-  Tabs, Progress, Avatar, Separator, IconButton, Heading
+  Tabs, Progress, Avatar, Separator, IconButton, Heading, AlertDialog
 } from '@radix-ui/themes';
 import {
   ArrowUpIcon, ArrowDownIcon, ReloadIcon, CalendarIcon,
   RocketIcon, TimerIcon, LightningBoltIcon, TargetIcon,
-  ActivityLogIcon, BarChartIcon, PieChartIcon, MixerHorizontalIcon
+  ActivityLogIcon, BarChartIcon, PieChartIcon, MixerHorizontalIcon,
+  ClockIcon, SunIcon, MoonIcon, ExclamationTriangleIcon, TrashIcon, GearIcon
 } from '@radix-ui/react-icons';
 import { 
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-import { statsAPI, ordersAPI } from '../services/api';
+import { statsAPI, ordersAPI, adminAPI } from '../services/api';
 
 // Animated counter component
 const AnimatedNumber = ({ value, prefix = '', suffix = '', decimals = 0 }) => {
@@ -113,7 +114,7 @@ const StatCard = ({ title, value, change, icon: Icon, color, prefix = '', suffix
                 <Text size="2" style={{ 
                   color: isPositive ? '#10b981' : '#ef4444'
                 }}>
-                  {Math.abs(change).toFixed(1)}%
+                  {isPositive ? '+' : ''}{change.toFixed(1)}%
                 </Text>
                 <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)', marginLeft: '4px' }}>
                   vs last period
@@ -167,53 +168,103 @@ const Dashboard = () => {
   });
   const [recentOrders, setRecentOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState('30');
+  const [timeRange, setTimeRange] = useState('today'); // Changed default from '30' to 'today'
   const [refreshing, setRefreshing] = useState(false);
   const [activeChart, setActiveChart] = useState('area');
+  const [clearingData, setClearingData] = useState(false);
+  const [dangerZoneOpen, setDangerZoneOpen] = useState(false);
 
-  // Mock data for testing
   useEffect(() => {
-    // Generate mock data if no real data
-    const mockDailySales = Array.from({ length: 30 }, (_, i) => ({
-      _id: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000).toISOString(),
-      revenue: Math.random() * 5000 + 1000,
-      profit: Math.random() * 2000 + 500,
-      orders: Math.floor(Math.random() * 50 + 10)
-    }));
-
-    const mockCategorySales = [
-      { name: 'Bulking', emoji: '💪', revenue: 12500 },
-      { name: 'Cutting', emoji: '🔥', revenue: 8700 },
-      { name: 'PCT', emoji: '💊', revenue: 6300 },
-      { name: 'Other', emoji: '📦', revenue: 3200 }
-    ];
-
-    setAnalytics({
-      daily_sales: mockDailySales,
-      category_sales: mockCategorySales,
-      hourly_distribution: []
-    });
-
     fetchData();
   }, [timeRange]);
 
   const fetchData = async () => {
     try {
+      // For today/yesterday, we need hourly data
+      let apiTimeRange = timeRange;
+      if (timeRange === 'today') {
+        apiTimeRange = 'today'; // Send 'today' to get hourly breakdown
+      } else if (timeRange === 'yesterday') {
+        apiTimeRange = 'yesterday'; // Send 'yesterday' to get hourly breakdown
+      }
+
       const [statsRes, ordersRes, analyticsRes] = await Promise.all([
         statsAPI.getDashboard(),
         ordersAPI.getAll(),
-        statsAPI.getAnalytics(timeRange)
+        statsAPI.getAnalytics(apiTimeRange)
       ]);
 
       setStats(statsRes.stats || {});
       setRecentOrders(ordersRes.orders?.slice(0, 5) || []);
       
-      // Use real data if available, otherwise keep mock data
-      if (analyticsRes?.daily_sales?.length > 0) {
-        setAnalytics(analyticsRes);
+      // Process analytics data for today - need to aggregate orders by hour
+      if (timeRange === 'today' || timeRange === 'yesterday') {
+        const currentHour = timeRange === 'today' ? new Date().getHours() : 23;
+        const todayData = [];
+        
+        // Initialize all hours with 0
+        for (let hour = 0; hour <= currentHour; hour++) {
+          todayData.push({
+            _id: `${hour.toString().padStart(2, '0')}:00`,
+            revenue: 0,
+            profit: 0,
+            orders: 0
+          });
+        }
+        
+        // If we have orders, aggregate them by hour
+        if (ordersRes.orders && ordersRes.orders.length > 0) {
+          const today = new Date();
+          const targetDate = timeRange === 'today' ? today : new Date(today.setDate(today.getDate() - 1));
+          
+          ordersRes.orders.forEach(order => {
+            const orderDate = new Date(order.created_at);
+            
+            // Check if order is from the target day
+            if (orderDate.toDateString() === targetDate.toDateString()) {
+              const orderHour = orderDate.getHours();
+              
+              // Find the corresponding hour slot
+              const hourSlot = todayData.find(slot => slot._id === `${orderHour.toString().padStart(2, '0')}:00`);
+              if (hourSlot) {
+                hourSlot.revenue += order.total_usdt || 0;
+                hourSlot.profit += ((order.total_usdt || 0) * 0.4); // Estimate profit as 40% of revenue
+                hourSlot.orders += 1;
+              }
+            }
+          });
+        }
+        
+        // If the backend provides hourly data, use it instead
+        if (analyticsRes?.hourly_data && Array.isArray(analyticsRes.hourly_data)) {
+          analyticsRes.hourly_data.forEach(hourData => {
+            const hourSlot = todayData.find(slot => {
+              const slotHour = parseInt(slot._id.split(':')[0]);
+              return slotHour === (hourData.hour || hourData._id?.hour);
+            });
+            if (hourSlot) {
+              hourSlot.revenue = hourData.revenue || hourSlot.revenue;
+              hourSlot.profit = hourData.profit || hourSlot.profit;
+              hourSlot.orders = hourData.orders || hourSlot.orders;
+            }
+          });
+        }
+        
+        setAnalytics({
+          ...analyticsRes,
+          daily_sales: todayData,
+          category_sales: analyticsRes?.category_sales || []
+        });
+      } else {
+        // For other time ranges, use daily data
+        setAnalytics(analyticsRes || { daily_sales: [], category_sales: [], hourly_distribution: [] });
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      // Set empty data on error
+      setStats({});
+      setRecentOrders([]);
+      setAnalytics({ daily_sales: [], category_sales: [], hourly_distribution: [] });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -223,6 +274,34 @@ const Dashboard = () => {
   const handleRefresh = () => {
     setRefreshing(true);
     fetchData();
+  };
+
+  const clearOrders = async () => {
+    setClearingData(true);
+    try {
+      await adminAPI.clearOrders();
+      alert('✅ Orders cleared successfully!');
+      fetchData();
+    } catch (error) {
+      console.error('Error clearing orders:', error);
+      alert('❌ Error clearing orders');
+    } finally {
+      setClearingData(false);
+    }
+  };
+
+  const clearUsers = async () => {
+    setClearingData(true);
+    try {
+      await adminAPI.clearUsers();
+      alert('✅ Users cleared successfully!');
+      fetchData();
+    } catch (error) {
+      console.error('Error clearing users:', error);
+      alert('❌ Error clearing users');
+    } finally {
+      setClearingData(false);
+    }
   };
 
   const formatPrice = (price) => {
@@ -246,9 +325,47 @@ const Dashboard = () => {
   }
 
   const timeRangeOptions = {
+    'today': 'Today',
+    'yesterday': 'Yesterday',
     '7': 'Last 7 days',
     '30': 'Last 30 days', 
     '90': 'Last 90 days'
+  };
+
+  // Get appropriate icon for time range
+  const getTimeRangeIcon = () => {
+    switch(timeRange) {
+      case 'today':
+        return <SunIcon width="16" height="16" />;
+      case 'yesterday':
+        return <MoonIcon width="16" height="16" />;
+      case '7':
+      case '30':
+      case '90':
+        return <CalendarIcon width="16" height="16" />;
+      default:
+        return <ClockIcon width="16" height="16" />;
+    }
+  };
+
+  // Format X-axis based on time range
+  const formatXAxis = (value) => {
+    if (timeRange === 'today' || timeRange === 'yesterday') {
+      return value; // Already formatted as hour
+    } else if (timeRange === '90') {
+      return value; // Week format
+    } else {
+      const date = new Date(value);
+      return `${date.getMonth() + 1}/${date.getDate()}`;
+    }
+  };
+
+  // Calculate growth percentages (you can replace with real calculations)
+  const growthData = {
+    revenue: 12.5,
+    orders: 8.2,
+    users: -2.4,
+    avgOrder: 5.1
   };
 
   // Render chart based on active tab
@@ -270,10 +387,7 @@ const Dashboard = () => {
           <XAxis 
             dataKey="_id" 
             stroke="rgba(255,255,255,0.3)"
-            tickFormatter={(value) => {
-              const date = new Date(value);
-              return `${date.getMonth() + 1}/${date.getDate()}`;
-            }}
+            tickFormatter={formatXAxis}
           />
           <YAxis stroke="rgba(255,255,255,0.3)" />
           <Tooltip content={<CustomTooltip />} />
@@ -304,10 +418,7 @@ const Dashboard = () => {
           <XAxis 
             dataKey="_id" 
             stroke="rgba(255,255,255,0.3)"
-            tickFormatter={(value) => {
-              const date = new Date(value);
-              return `${date.getMonth() + 1}/${date.getDate()}`;
-            }}
+            tickFormatter={formatXAxis}
           />
           <YAxis stroke="rgba(255,255,255,0.3)" />
           <Tooltip content={<CustomTooltip />} />
@@ -322,10 +433,7 @@ const Dashboard = () => {
           <XAxis 
             dataKey="_id" 
             stroke="rgba(255,255,255,0.3)"
-            tickFormatter={(value) => {
-              const date = new Date(value);
-              return `${date.getMonth() + 1}/${date.getDate()}`;
-            }}
+            tickFormatter={formatXAxis}
           />
           <YAxis stroke="rgba(255,255,255,0.3)" />
           <Tooltip content={<CustomTooltip />} />
@@ -354,14 +462,33 @@ const Dashboard = () => {
 
   return (
     <Box>
-      {/* Header */}
+      {/* Header with Danger Zone button */}
       <Flex align="center" justify="between" mb="6">
         <Box>
-          <Heading size="8" weight="bold" style={{ marginBottom: '8px' }}>
-            Dashboard Overview
-          </Heading>
-          <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-            Welcome back! Here's what's happening with your store today.
+          <Flex align="center" gap="3">
+            <Heading size="8" weight="bold">
+              Dashboard Overview
+            </Heading>
+            {/* Danger Zone link - smaller and styled as link */}
+            <Button
+              size="1"
+              variant="ghost"
+              color="red"
+              onClick={() => setDangerZoneOpen(true)}
+              style={{
+                cursor: 'pointer',
+                fontSize: '13px',
+                padding: '4px 8px'
+              }}
+            >
+              <ExclamationTriangleIcon width="14" height="14" />
+              Danger Zone
+            </Button>
+          </Flex>
+          <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginTop: '8px' }}>
+            {timeRange === 'today' ? "Today's live performance metrics" :
+             timeRange === 'yesterday' ? "Yesterday's complete overview" :
+             "Welcome back! Here's what's happening with your store."}
           </Text>
         </Box>
         
@@ -376,14 +503,48 @@ const Dashboard = () => {
               }}
             >
               <Flex align="center" gap="2">
-                <CalendarIcon width="16" height="16" />
+                {getTimeRangeIcon()}
                 <Text>{timeRangeOptions[timeRange]}</Text>
               </Flex>
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value="7">Last 7 days</Select.Item>
-              <Select.Item value="30">Last 30 days</Select.Item>
-              <Select.Item value="90">Last 90 days</Select.Item>
+              <Select.Group>
+                <Select.Label>Daily</Select.Label>
+                <Select.Item value="today">
+                  <Flex align="center" gap="2">
+                    <SunIcon width="14" height="14" />
+                    Today
+                  </Flex>
+                </Select.Item>
+                <Select.Item value="yesterday">
+                  <Flex align="center" gap="2">
+                    <MoonIcon width="14" height="14" />
+                    Yesterday
+                  </Flex>
+                </Select.Item>
+              </Select.Group>
+              <Select.Separator />
+              <Select.Group>
+                <Select.Label>Historical</Select.Label>
+                <Select.Item value="7">
+                  <Flex align="center" gap="2">
+                    <CalendarIcon width="14" height="14" />
+                    Last 7 days
+                  </Flex>
+                </Select.Item>
+                <Select.Item value="30">
+                  <Flex align="center" gap="2">
+                    <CalendarIcon width="14" height="14" />
+                    Last 30 days
+                  </Flex>
+                </Select.Item>
+                <Select.Item value="90">
+                  <Flex align="center" gap="2">
+                    <CalendarIcon width="14" height="14" />
+                    Last 90 days
+                  </Flex>
+                </Select.Item>
+              </Select.Group>
             </Select.Content>
           </Select.Root>
 
@@ -408,12 +569,28 @@ const Dashboard = () => {
         </Flex>
       </Flex>
 
-      {/* Stats Grid */}
+      {/* Live indicator for today */}
+      {timeRange === 'today' && (
+        <Flex align="center" gap="2" mb="4">
+          <Box style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: '#10b981',
+            animation: 'pulse 2s infinite'
+          }} />
+          <Text size="2" style={{ color: '#10b981' }}>
+            Live data - Updates every minute
+          </Text>
+        </Flex>
+      )}
+
+      {/* Stats Grid with growth percentages */}
       <Grid columns={{ initial: '1', sm: '2', lg: '4' }} gap="4" mb="6">
         <StatCard
           title="Total Revenue"
           value={stats.total_revenue_usdt || 0}
-          change={12.5}
+          change={growthData.revenue}
           icon={RocketIcon}
           color="#8b5cf6"
           prefix="$"
@@ -422,21 +599,21 @@ const Dashboard = () => {
         <StatCard
           title="Total Orders"
           value={stats.total_orders || 0}
-          change={8.2}
+          change={growthData.orders}
           icon={TargetIcon}
           color="#10b981"
         />
         <StatCard
           title="Active Users"
           value={stats.total_users || 0}
-          change={-2.4}
+          change={growthData.users}
           icon={ActivityLogIcon}
           color="#f59e0b"
         />
         <StatCard
           title="Avg Order Value"
           value={stats.avg_order_value || 0}
-          change={5.1}
+          change={growthData.avgOrder}
           icon={LightningBoltIcon}
           color="#06b6d4"
           prefix="$"
@@ -456,7 +633,18 @@ const Dashboard = () => {
             minHeight: '400px'
           }}>
             <Flex align="center" justify="between" mb="4">
-              <Heading size="4">Sales Analytics</Heading>
+              <Box>
+                <Heading size="4">
+                  {timeRange === 'today' ? 'Today\'s Performance' :
+                   timeRange === 'yesterday' ? 'Yesterday\'s Performance' :
+                   'Sales Analytics'}
+                </Heading>
+                {(timeRange === 'today' || timeRange === 'yesterday') && (
+                  <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', marginTop: '4px' }}>
+                    Hourly breakdown
+                  </Text>
+                )}
+              </Box>
               <Tabs.Root value={activeChart} onValueChange={setActiveChart}>
                 <Tabs.List size="1">
                   <Tabs.Trigger value="area">Area</Tabs.Trigger>
@@ -467,9 +655,17 @@ const Dashboard = () => {
             </Flex>
 
             <Box style={{ width: '100%', height: '320px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                {renderChart()}
-              </ResponsiveContainer>
+              {analytics.daily_sales.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  {renderChart()}
+                </ResponsiveContainer>
+              ) : (
+                <Flex align="center" justify="center" style={{ height: '100%' }}>
+                  <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                    No data available for this period
+                  </Text>
+                </Flex>
+              )}
             </Box>
           </Card>
         </Box>
@@ -484,43 +680,53 @@ const Dashboard = () => {
         }}>
           <Heading size="4" mb="4">Category Sales</Heading>
           
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie
-                data={analytics.category_sales}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="revenue"
-              >
-                {analytics.category_sales.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip content={<CustomTooltip />} />
-            </PieChart>
-          </ResponsiveContainer>
+          {analytics.category_sales.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={analytics.category_sales}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="revenue"
+                  >
+                    {analytics.category_sales.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
 
-          <Box mt="4">
-            {analytics.category_sales.map((cat, idx) => (
-              <Flex key={idx} align="center" justify="between" style={{ marginBottom: '8px' }}>
-                <Flex align="center" gap="2">
-                  <Box style={{
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '3px',
-                    background: COLORS[idx % COLORS.length]
-                  }} />
-                  <Text size="2">{cat.emoji} {cat.name}</Text>
-                </Flex>
-                <Text size="2" weight="medium">
-                  ${formatPrice(cat.revenue)}
-                </Text>
-              </Flex>
-            ))}
-          </Box>
+              <Box mt="4">
+                {analytics.category_sales.map((cat, idx) => (
+                  <Flex key={idx} align="center" justify="between" style={{ marginBottom: '8px' }}>
+                    <Flex align="center" gap="2">
+                      <Box style={{
+                        width: '12px',
+                        height: '12px',
+                        borderRadius: '3px',
+                        background: COLORS[idx % COLORS.length]
+                      }} />
+                      <Text size="2">{cat.emoji} {cat.name}</Text>
+                    </Flex>
+                    <Text size="2" weight="medium">
+                      ${formatPrice(cat.revenue)}
+                    </Text>
+                  </Flex>
+                ))}
+              </Box>
+            </>
+          ) : (
+            <Flex align="center" justify="center" style={{ height: '200px' }}>
+              <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                No category data available
+              </Text>
+            </Flex>
+          )}
         </Card>
       </Grid>
 
@@ -662,6 +868,112 @@ const Dashboard = () => {
           </Flex>
         </Card>
       </Grid>
+
+      {/* Danger Zone Modal */}
+      <AlertDialog.Root open={dangerZoneOpen} onOpenChange={setDangerZoneOpen}>
+        <AlertDialog.Content style={{ maxWidth: 500 }}>
+          <AlertDialog.Title>
+            <Flex align="center" gap="2">
+              <ExclamationTriangleIcon width="24" height="24" style={{ color: '#ef4444' }} />
+              <Text size="6" weight="bold" style={{ color: '#ef4444' }}>
+                Danger Zone
+              </Text>
+            </Flex>
+          </AlertDialog.Title>
+          
+          <AlertDialog.Description>
+            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '24px' }}>
+              These actions are irreversible and will permanently delete data. Use with extreme caution.
+            </Text>
+            
+            <Flex direction="column" gap="3">
+              <AlertDialog.Root>
+                <AlertDialog.Trigger>
+                  <Button
+                    size="3"
+                    color="red"
+                    variant="surface"
+                    disabled={clearingData}
+                    style={{
+                      width: '100%',
+                      cursor: clearingData ? 'not-allowed' : 'pointer',
+                      opacity: clearingData ? 0.7 : 1
+                    }}
+                  >
+                    <TrashIcon width="16" height="16" />
+                    Clear All Orders
+                  </Button>
+                </AlertDialog.Trigger>
+                <AlertDialog.Content style={{ maxWidth: 450 }}>
+                  <AlertDialog.Title>Clear All Orders</AlertDialog.Title>
+                  <AlertDialog.Description size="2">
+                    Are you sure you want to delete all orders? This will also reset user statistics.
+                    This action cannot be undone.
+                  </AlertDialog.Description>
+                  <Flex gap="3" mt="4" justify="end">
+                    <AlertDialog.Cancel>
+                      <Button variant="soft" color="gray">
+                        Cancel
+                      </Button>
+                    </AlertDialog.Cancel>
+                    <AlertDialog.Action>
+                      <Button variant="solid" color="red" onClick={clearOrders}>
+                        Yes, delete all orders
+                      </Button>
+                    </AlertDialog.Action>
+                  </Flex>
+                </AlertDialog.Content>
+              </AlertDialog.Root>
+
+              <AlertDialog.Root>
+                <AlertDialog.Trigger>
+                  <Button
+                    size="3"
+                    color="red"
+                    variant="surface"
+                    disabled={clearingData}
+                    style={{
+                      width: '100%',
+                      cursor: clearingData ? 'not-allowed' : 'pointer',
+                      opacity: clearingData ? 0.7 : 1
+                    }}
+                  >
+                    <TrashIcon width="16" height="16" />
+                    Clear All Users
+                  </Button>
+                </AlertDialog.Trigger>
+                <AlertDialog.Content style={{ maxWidth: 450 }}>
+                  <AlertDialog.Title>Clear All Users</AlertDialog.Title>
+                  <AlertDialog.Description size="2">
+                    Are you sure you want to delete all users? This will remove all user data permanently.
+                    This action cannot be undone.
+                  </AlertDialog.Description>
+                  <Flex gap="3" mt="4" justify="end">
+                    <AlertDialog.Cancel>
+                      <Button variant="soft" color="gray">
+                        Cancel
+                      </Button>
+                    </AlertDialog.Cancel>
+                    <AlertDialog.Action>
+                      <Button variant="solid" color="red" onClick={clearUsers}>
+                        Yes, delete all users
+                      </Button>
+                    </AlertDialog.Action>
+                  </Flex>
+                </AlertDialog.Content>
+              </AlertDialog.Root>
+            </Flex>
+            
+            <Flex gap="3" mt="4" justify="end">
+              <AlertDialog.Cancel>
+                <Button variant="soft" size="3">
+                  Close
+                </Button>
+              </AlertDialog.Cancel>
+            </Flex>
+          </AlertDialog.Description>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </Box>
   );
 };
