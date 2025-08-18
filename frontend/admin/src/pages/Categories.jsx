@@ -12,21 +12,7 @@ import {
   LayersIcon, CubeIcon, ArrowUpIcon, ArrowDownIcon,
   EyeOpenIcon, EyeNoneIcon
 } from '@radix-ui/react-icons';
-
-// Mock API for testing
-const categoriesAPI = {
-  getAll: async () => ({
-    categories: [
-      { _id: '1', name: 'Bulking Essentials', emoji: '💪', description: 'Products for massive gains', order: 1, is_active: true, product_count: 12 },
-      { _id: '2', name: 'Cutting Stack', emoji: '🔥', description: 'Get shredded and lean', order: 2, is_active: true, product_count: 8 },
-      { _id: '3', name: 'PCT Support', emoji: '💊', description: 'Post cycle therapy products', order: 3, is_active: true, product_count: 5 },
-      { _id: '4', name: 'Pre-Workout', emoji: '⚡', description: 'Energy and pump products', order: 4, is_active: false, product_count: 3 }
-    ]
-  }),
-  create: async (data) => ({ success: true }),
-  update: async (id, data) => ({ success: true }),
-  delete: async (id) => ({ success: true })
-};
+import { categoriesAPI } from '../services/api';
 
 // Emoji picker component
 const EmojiPicker = ({ value, onChange }) => {
@@ -72,11 +58,11 @@ const CategoryFormModal = ({ category, isOpen, onClose, onSave }) => {
   useEffect(() => {
     if (category) {
       setFormData({
-        name: category.name,
-        emoji: category.emoji,
-        description: category.description,
-        order: category.order,
-        is_active: category.is_active
+        name: category.name || '',
+        emoji: category.emoji || '📦',
+        description: category.description || '',
+        order: category.order || 1,
+        is_active: category.is_active !== false
       });
     } else {
       setFormData({
@@ -109,9 +95,14 @@ const CategoryFormModal = ({ category, isOpen, onClose, onSave }) => {
     if (!validate()) return;
 
     setSaving(true);
-    await onSave(formData);
-    setSaving(false);
-    onClose();
+    try {
+      await onSave(formData);
+      onClose();
+    } catch (error) {
+      console.error('Error saving category:', error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -288,9 +279,17 @@ const Categories = () => {
   const fetchCategories = async () => {
     try {
       const response = await categoriesAPI.getAll();
-      setCategories(response.categories || []);
+      
+      // Process categories data
+      const categoriesData = response.categories || [];
+      
+      // Sort by order field
+      const sortedCategories = categoriesData.sort((a, b) => (a.order || 0) - (b.order || 0));
+      
+      setCategories(sortedCategories);
     } catch (error) {
       console.error('Error fetching categories:', error);
+      // Show error notification if you have a notification system
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -305,29 +304,37 @@ const Categories = () => {
   const handleSave = async (formData) => {
     try {
       if (selectedCategory) {
+        // Update existing category
         await categoriesAPI.update(selectedCategory._id, formData);
       } else {
+        // Create new category
         await categoriesAPI.create(formData);
       }
+      // Refresh categories list
       await fetchCategories();
     } catch (error) {
       console.error('Error saving category:', error);
+      // Show error notification
+      alert('Error saving category. Please try again.');
     }
   };
 
   const handleDelete = async (category) => {
+    // Check if category has products
     if (category.product_count > 0) {
       alert(`Cannot delete category with ${category.product_count} products. Remove all products first.`);
       return;
     }
 
-    if (!confirm(`Delete category "${category.name}"? This cannot be undone!`)) return;
+    // Confirm deletion
+    if (!confirm(`Delete category "${category.name}"? This action cannot be undone!`)) return;
 
     try {
       await categoriesAPI.delete(category._id);
       await fetchCategories();
     } catch (error) {
       console.error('Error deleting category:', error);
+      alert('Error deleting category. Please try again.');
     }
   };
 
@@ -342,36 +349,44 @@ const Categories = () => {
   };
 
   const moveCategory = async (category, direction) => {
-    const currentOrder = category.order;
+    const currentOrder = category.order || 1;
     const newOrder = direction === 'up' ? currentOrder - 1 : currentOrder + 1;
     
     if (newOrder < 1) return;
     
-    // Swap with the other category
+    // Find the category to swap with
     const otherCategory = categories.find(c => c.order === newOrder);
     if (otherCategory) {
-      await categoriesAPI.update(category._id, { ...category, order: newOrder });
-      await categoriesAPI.update(otherCategory._id, { ...otherCategory, order: currentOrder });
-      await fetchCategories();
+      try {
+        // Update both categories' order
+        await Promise.all([
+          categoriesAPI.update(category._id, { ...category, order: newOrder }),
+          categoriesAPI.update(otherCategory._id, { ...otherCategory, order: currentOrder })
+        ]);
+        await fetchCategories();
+      } catch (error) {
+        console.error('Error reordering categories:', error);
+        alert('Error reordering categories. Please try again.');
+      }
     }
   };
 
-  // Filter categories
+  // Filter categories based on search and active status
   const filteredCategories = categories
     .filter(cat => {
-      const matchesSearch = cat.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           cat.description.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesActive = showInactive || cat.is_active;
+      const matchesSearch = 
+        cat.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        cat.description?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesActive = showInactive || cat.is_active !== false;
       return matchesSearch && matchesActive;
-    })
-    .sort((a, b) => a.order - b.order);
+    });
 
-  // Calculate stats
+  // Calculate statistics
   const stats = {
     total: categories.length,
-    active: categories.filter(c => c.is_active).length,
-    inactive: categories.filter(c => !c.is_active).length,
-    products: categories.reduce((sum, c) => sum + c.product_count, 0)
+    active: categories.filter(c => c.is_active !== false).length,
+    inactive: categories.filter(c => c.is_active === false).length,
+    products: categories.reduce((sum, c) => sum + (c.product_count || 0), 0)
   };
 
   if (loading) {
@@ -667,7 +682,7 @@ const Categories = () => {
                 height: '100%',
                 position: 'relative',
                 overflow: 'hidden',
-                opacity: category.is_active ? 1 : 0.6
+                opacity: category.is_active !== false ? 1 : 0.6
               }}>
                 {/* Order badge */}
                 <Box style={{
@@ -684,7 +699,7 @@ const Categories = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {category.order}
+                  {category.order || 1}
                 </Box>
 
                 <Flex direction="column" gap="3">
@@ -701,24 +716,24 @@ const Categories = () => {
                       fontSize: '24px',
                       border: '1px solid rgba(139, 92, 246, 0.2)'
                     }}>
-                      {category.emoji}
+                      {category.emoji || '📦'}
                     </Box>
                     <Box style={{ flex: 1 }}>
                       <Heading size="3" style={{ marginBottom: '4px' }}>
                         {category.name}
                       </Heading>
                       <Badge 
-                        color={category.is_active ? 'green' : 'red'} 
+                        color={category.is_active !== false ? 'green' : 'red'} 
                         variant="soft"
                       >
-                        {category.is_active ? 'Active' : 'Inactive'}
+                        {category.is_active !== false ? 'Active' : 'Inactive'}
                       </Badge>
                     </Box>
                   </Flex>
 
                   {/* Description */}
                   <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-                    {category.description}
+                    {category.description || 'No description'}
                   </Text>
 
                   {/* Stats */}
@@ -726,7 +741,7 @@ const Categories = () => {
                     <Flex align="center" gap="2">
                       <CubeIcon width="16" height="16" style={{ opacity: 0.6 }} />
                       <Text size="2">
-                        <strong>{category.product_count}</strong> products
+                        <strong>{category.product_count || 0}</strong> products
                       </Text>
                     </Flex>
                   </Flex>
@@ -768,10 +783,10 @@ const Categories = () => {
                         variant="soft"
                         color="red"
                         onClick={() => handleDelete(category)}
-                        disabled={category.product_count > 0}
+                        disabled={(category.product_count || 0) > 0}
                         style={{ 
-                          cursor: category.product_count > 0 ? 'not-allowed' : 'pointer',
-                          opacity: category.product_count > 0 ? 0.5 : 1
+                          cursor: (category.product_count || 0) > 0 ? 'not-allowed' : 'pointer',
+                          opacity: (category.product_count || 0) > 0 ? 0.5 : 1
                         }}
                       >
                         <TrashIcon width="16" height="16" />

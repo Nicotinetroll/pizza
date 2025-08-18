@@ -13,6 +13,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 import logging
+from contextlib import asynccontextmanager
 
 # Load environment variables
 load_dotenv('/opt/telegram-shop-bot/.env')
@@ -21,6 +22,22 @@ app = FastAPI(title="AnabolicPizza API - Enhanced with Notifications")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Lifespan event handler (replaces deprecated on_event)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    from bot_modules.public_notifications import fake_order_scheduler
+    asyncio.create_task(fake_order_scheduler())
+    logger.info("Started fake order scheduler")
+    yield
+    # Shutdown
+    logger.info("Shutting down...")
+
+app = FastAPI(
+    title="AnabolicPizza API - Enhanced with Notifications",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -847,14 +864,30 @@ class PayoutModel(BaseModel):
 @app.get("/api/sellers")
 async def get_sellers(email: str = Depends(verify_token)):
     """Get all sellers with their stats"""
-    sellers = await db.sellers.find({}).to_list(100)
+    # Get only non-deleted sellers
+    sellers = await db.sellers.find({
+        "deleted_at": {"$exists": False}  # Exclude soft deleted
+    }).to_list(100)
     
     for seller in sellers:
         seller["_id"] = str(seller["_id"])
         
+        # Skip inactive sellers in calculations
+        if seller.get("is_active") == False:
+            seller["referral_codes"] = []
+            seller["total_sales"] = "0.00"
+            seller["total_commission"] = "0.00"
+            seller["total_earnings"] = "0.00"
+            seller["pending_earnings"] = "0.00"
+            seller["total_paid"] = "0.00"
+            seller["total_orders"] = 0
+            seller["commission_percentage"] = seller.get("commission_percentage", 30)
+            seller["created_at"] = seller.get("created_at", datetime.now(timezone.utc))
+            continue
+        
         # Calculate earnings from referral codes
         referral_codes = await db.referral_codes.find({
-            "seller_id": seller["_id"]
+            "seller_id": str(seller["_id"])
         }).to_list(100)
         
         seller["referral_codes"] = []
@@ -905,7 +938,7 @@ async def get_sellers(email: str = Depends(verify_token)):
             total_sales += code_sales
         
         payouts = await db.seller_payouts.find({
-            "seller_id": seller["_id"]
+            "seller_id": str(seller["_id"])
         }).to_list(100)
         
         total_paid = sum(p.get("amount", 0) for p in payouts)
@@ -965,17 +998,110 @@ async def update_seller(
     return {"message": "Seller updated successfully"}
 
 @app.delete("/api/sellers/{seller_id}")
-async def delete_seller(seller_id: str, email: str = Depends(verify_token)):
-    """Delete seller (soft delete - just deactivate)"""
-    result = await db.sellers.update_one(
-        {"_id": ObjectId(seller_id)},
-        {"$set": {"is_active": False, "deleted_at": datetime.now(timezone.utc)}}
-    )
+async def delete_seller(
+    seller_id: str, 
+    hard: bool = False,  # Query parameter for hard delete
+    email: str = Depends(verify_token)
+):
+    """Delete seller - soft delete (deactivate) or hard delete (permanent)"""
     
-    if result.modified_count == 0:
+    # Check if seller exists
+    seller = await db.sellers.find_one({"_id": ObjectId(seller_id)})
+    if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
     
-    return {"message": "Seller deactivated"}
+    if hard:
+        # HARD DELETE - permanently remove from database
+        logger.info(f"Hard deleting seller {seller_id}")
+        
+        # 1. Delete payout records
+        await db.seller_payouts.delete_many({"seller_id": seller_id})
+        
+        # 2. Remove seller_id from referral codes (but keep the codes)
+        await db.referral_codes.update_many(
+            {"seller_id": seller_id},
+            {"$unset": {"seller_id": "", "seller_name": ""}}
+        )
+        
+        # 3. Delete the seller
+        result = await db.sellers.delete_one({"_id": ObjectId(seller_id)})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Failed to delete seller")
+        
+        # Log the hard delete
+        await db.audit_logs.insert_one({
+            "admin_id": email,
+            "action": "HARD_DELETE_SELLER",
+            "entity_type": "seller",
+            "entity_id": ObjectId(seller_id),
+            "timestamp": datetime.now(timezone.utc),
+            "notes": "Permanently deleted seller and associated data"
+        })
+        
+        return {"message": "Seller permanently deleted", "type": "hard_delete", "success": True}
+    
+    else:
+        # SOFT DELETE - just deactivate
+        logger.info(f"Soft deleting seller {seller_id}")
+        
+        result = await db.sellers.update_one(
+            {"_id": ObjectId(seller_id)},
+            {"$set": {
+                "is_active": False, 
+                "deleted_at": datetime.now(timezone.utc),
+                "deleted_by": email
+            }}
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=404, detail="Failed to deactivate seller")
+        
+        # Log the soft delete
+        await db.audit_logs.insert_one({
+            "admin_id": email,
+            "action": "SOFT_DELETE_SELLER",
+            "entity_type": "seller",
+            "entity_id": ObjectId(seller_id),
+            "timestamp": datetime.now(timezone.utc),
+            "notes": "Deactivated seller (soft delete)"
+        })
+        
+        return {"message": "Seller deactivated", "type": "soft_delete", "success": True}
+        
+@app.get("/api/sellers/debug")
+async def debug_sellers(email: str = Depends(verify_token)):
+    """Debug endpoint to see all sellers in database"""
+    all_sellers = await db.sellers.find({}).to_list(100)
+    for s in all_sellers:
+        s["_id"] = str(s["_id"])
+    
+    return {
+        "total_in_db": await db.sellers.count_documents({}),
+        "active_count": await db.sellers.count_documents({"is_active": True}),
+        "inactive_count": await db.sellers.count_documents({"is_active": False}),
+        "with_deleted_at": await db.sellers.count_documents({"deleted_at": {"$exists": True}}),
+        "without_deleted_at": await db.sellers.count_documents({"deleted_at": {"$exists": False}}),
+        "all_sellers": all_sellers
+    }
+
+# Reset sellers to active (useful for testing)
+@app.post("/api/sellers/reset-active")
+async def reset_sellers_active(email: str = Depends(verify_token)):
+    """Reset all sellers to active status"""
+    result = await db.sellers.update_many(
+        {},
+        {
+            "$set": {"is_active": True},
+            "$unset": {"deleted_at": "", "deleted_by": ""}
+        }
+    )
+    
+    return {
+        "message": f"Reset {result.modified_count} sellers to active",
+        "modified": result.modified_count,
+        "success": True
+    }
 
 # ASSIGN REFERRAL CODE TO SELLER
 @app.post("/api/referrals/{referral_id}/assign-seller")
@@ -1190,7 +1316,11 @@ async def get_sellers_stats(email: str = Depends(verify_token)):
 
 async def get_top_sellers():
     """Helper to get top performing sellers"""
-    sellers = await db.sellers.find({"is_active": True}).to_list(100)
+    sellers = await db.sellers.find({
+        "is_active": {"$ne": False},
+        "deleted_at": {"$exists": False}
+    }).to_list(100)
+    
     seller_earnings = []
     
     for seller in sellers:

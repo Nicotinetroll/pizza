@@ -77,12 +77,12 @@ export const authAPI = {
       email: sanitizeInput(email),
       password: sanitizeInput(password)
     });
-    
+
     // Store token after successful login
     if (response.data.token) {
       localStorage.setItem('token', response.data.token);
     }
-    
+
     return response.data;
   },
 
@@ -267,7 +267,7 @@ export const statsAPI = {
     const response = await api.get('/dashboard/stats');
     return response.data;
   },
-  
+
   getAnalytics: async (days = 30) => {
     const response = await api.get(`/dashboard/analytics?days=${days}`);
     return response.data;
@@ -303,12 +303,16 @@ export const sellersAPI = {
     return response.data;
   },
 
-  delete: async (id) => {
+  delete: async (id, hardDelete = false) => {
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       throw new Error('Invalid seller ID');
     }
+    
+    const url = hardDelete
+        ? `/sellers/${id}?hard=true`
+        : `/sellers/${id}`;
 
-    const response = await api.delete(`/sellers/${id}`);
+    const response = await api.delete(url);
     return response.data;
   },
 
@@ -348,7 +352,7 @@ export const sellersAPI = {
     if (!referralId.match(/^[0-9a-fA-F]{24}$/)) {
       throw new Error('Invalid referral ID');
     }
-    
+
     if (!sellerId.match(/^[0-9a-fA-F]{24}$/)) {
       throw new Error('Invalid seller ID');
     }
@@ -356,7 +360,7 @@ export const sellersAPI = {
     const response = await api.post(`/referrals/${referralId}/assign-seller`, {
       seller_id: sellerId
     });
-    
+
     return response.data;
   },
 
