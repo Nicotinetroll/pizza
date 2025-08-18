@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Users, DollarSign, TrendingUp, CreditCard, Plus, Edit, Eye, Link, History, AlertCircle } from 'lucide-react';
-import { sellersAPI } from '../services/api';
+import { Users, DollarSign, TrendingUp, CreditCard, Plus, Edit, Eye, Link, Trash2, AlertCircle } from 'lucide-react';
+import { sellersAPI, referralsAPI } from '../services/api';
 
 const Sellers = () => {
     const [sellers, setSellers] = useState([]);
@@ -11,6 +11,8 @@ const Sellers = () => {
     const [earningsData, setEarningsData] = useState(null);
     const [stats, setStats] = useState(null);
     const [referralCodes, setReferralCodes] = useState([]);
+    const [showAssignModal, setShowAssignModal] = useState(false);
+    const [selectedSeller, setSelectedSeller] = useState(null);
     
     const [formData, setFormData] = useState({
         name: '',
@@ -49,14 +51,8 @@ const Sellers = () => {
 
     const fetchReferralCodes = async () => {
         try {
-            // Fetch all referral codes to show available ones
-            const response = await fetch('/api/referrals', {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-            });
-            const data = await response.json();
-            setReferralCodes(data.referrals || []);
+            const response = await referralsAPI.getAll();
+            setReferralCodes(response.referrals || []);
         } catch (error) {
             console.error('Error fetching referral codes:', error);
         }
@@ -93,6 +89,21 @@ const Sellers = () => {
         }
     };
 
+    const handleDelete = async (sellerId, sellerName) => {
+        if (!confirm(`Are you sure you want to delete seller "${sellerName}"?\n\nThis will deactivate the seller but keep their history.`)) {
+            return;
+        }
+        
+        try {
+            await sellersAPI.delete(sellerId);
+            alert('✅ Seller deactivated successfully!');
+            fetchSellers();
+            fetchStats();
+        } catch (error) {
+            alert('❌ Error: ' + error.message);
+        }
+    };
+
     const handlePayout = async (sellerId, pendingAmount) => {
         const amount = prompt(`Enter payout amount (Max: $${pendingAmount}):`);
         if (!amount) return;
@@ -121,7 +132,6 @@ const Sellers = () => {
             fetchSellers();
             fetchStats();
             
-            // Refresh earnings if viewing
             if (viewingEarnings === sellerId) {
                 fetchSellerEarnings(sellerId);
             }
@@ -130,17 +140,22 @@ const Sellers = () => {
         }
     };
 
-    const assignReferralCode = async (sellerId, codeId) => {
-        if (!confirm('Assign this referral code to the seller?')) return;
-        
+    const assignReferralCode = async (referralId, sellerId) => {
         try {
-            await sellersAPI.assignReferralCode(codeId, sellerId);
-            alert('✅ Referral code assigned!');
+            await sellersAPI.assignReferralCode(referralId, sellerId);
+            alert('✅ Referral code assigned successfully!');
+            setShowAssignModal(false);
+            setSelectedSeller(null);
             fetchSellers();
             fetchReferralCodes();
         } catch (error) {
             alert('❌ Error: ' + error.message);
         }
+    };
+
+    const openAssignModal = (seller) => {
+        setSelectedSeller(seller);
+        setShowAssignModal(true);
     };
 
     const resetForm = () => {
@@ -345,9 +360,27 @@ const Sellers = () => {
                                                     {code.code} ({code.uses} uses)
                                                 </span>
                                             ))}
-                                            {seller.referral_codes?.length === 0 && (
+                                            {(!seller.referral_codes || seller.referral_codes.length === 0) && (
                                                 <span style={{ color: '#666', fontSize: '12px' }}>No codes</span>
                                             )}
+                                            <button
+                                                onClick={() => openAssignModal(seller)}
+                                                style={{
+                                                    marginTop: '5px',
+                                                    padding: '4px 8px',
+                                                    background: '#667eea',
+                                                    border: 'none',
+                                                    borderRadius: '5px',
+                                                    color: '#fff',
+                                                    fontSize: '11px',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px'
+                                                }}
+                                            >
+                                                <Link size={12} /> Assign Code
+                                            </button>
                                         </div>
                                     </td>
                                     <td style={{ color: '#00c896', fontWeight: 'bold' }}>
@@ -379,6 +412,14 @@ const Sellers = () => {
                                             >
                                                 <Edit size={16} />
                                             </button>
+                                            <button
+                                                onClick={() => handleDelete(seller._id, seller.name)}
+                                                className="btn-delete"
+                                                style={{ padding: '5px 10px' }}
+                                                title="Delete"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
                                             {parseFloat(seller.pending_earnings) > 0 && (
                                                 <button
                                                     onClick={() => handlePayout(seller._id, seller.pending_earnings)}
@@ -403,6 +444,141 @@ const Sellers = () => {
                     </table>
                 )}
             </div>
+
+            {/* Assign Referral Code Modal */}
+            {showAssignModal && selectedSeller && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.8)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999
+                }}>
+                    <div style={{
+                        background: '#1a1a1a',
+                        borderRadius: '20px',
+                        padding: '30px',
+                        maxWidth: '600px',
+                        width: '90%',
+                        maxHeight: '70vh',
+                        overflow: 'auto'
+                    }}>
+                        <h3 style={{ marginBottom: '20px' }}>
+                            🔗 Assign Referral Code to {selectedSeller.name}
+                        </h3>
+                        
+                        <div style={{ marginBottom: '20px', color: '#888' }}>
+                            Select a referral code to assign to this seller. They will earn {selectedSeller.commission_percentage}% commission on profits from orders using their code.
+                        </div>
+
+                        {/* Currently assigned codes */}
+                        {selectedSeller.referral_codes && selectedSeller.referral_codes.length > 0 && (
+                            <div style={{ marginBottom: '20px' }}>
+                                <h4 style={{ marginBottom: '10px', color: '#00c896' }}>Currently Assigned:</h4>
+                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                    {selectedSeller.referral_codes.map(code => (
+                                        <span key={code.code} style={{
+                                            background: '#2a2a2a',
+                                            padding: '5px 12px',
+                                            borderRadius: '8px',
+                                            border: '1px solid #00c896'
+                                        }}>
+                                            {code.code}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Available codes */}
+                        <h4 style={{ marginBottom: '15px' }}>Available Referral Codes:</h4>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {referralCodes
+                                .filter(code => !code.seller_id || code.seller_id === selectedSeller._id)
+                                .map(code => (
+                                    <div key={code._id} style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        padding: '15px',
+                                        background: '#2a2a2a',
+                                        borderRadius: '10px',
+                                        border: code.seller_id === selectedSeller._id ? '1px solid #00c896' : '1px solid #3a3a3a'
+                                    }}>
+                                        <div>
+                                            <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
+                                                {code.code}
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#888' }}>
+                                                {code.description} • 
+                                                {code.discount_type === 'percentage' ? ` ${code.discount_value}%` : ` $${code.discount_value}`} • 
+                                                Used: {code.used_count || 0} times
+                                            </div>
+                                            {code.seller_id === selectedSeller._id && (
+                                                <div style={{ fontSize: '11px', color: '#00c896', marginTop: '5px' }}>
+                                                    ✅ Already assigned to this seller
+                                                </div>
+                                            )}
+                                        </div>
+                                        {code.seller_id !== selectedSeller._id && (
+                                            <button
+                                                onClick={() => assignReferralCode(code._id, selectedSeller._id)}
+                                                style={{
+                                                    padding: '8px 16px',
+                                                    background: '#667eea',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    color: '#fff',
+                                                    cursor: 'pointer',
+                                                    fontSize: '12px'
+                                                }}
+                                            >
+                                                Assign
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                        </div>
+
+                        {referralCodes.filter(code => !code.seller_id).length === 0 && (
+                            <div style={{ 
+                                padding: '20px', 
+                                textAlign: 'center', 
+                                color: '#666',
+                                background: '#2a2a2a',
+                                borderRadius: '10px'
+                            }}>
+                                No unassigned referral codes available. Create new codes in the Referrals tab.
+                            </div>
+                        )}
+                        
+                        <button
+                            onClick={() => {
+                                setShowAssignModal(false);
+                                setSelectedSeller(null);
+                            }}
+                            style={{
+                                marginTop: '20px',
+                                padding: '12px 24px',
+                                background: '#3a3a3a',
+                                border: 'none',
+                                borderRadius: '10px',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                width: '100%'
+                            }}
+                        >
+                            Close
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Earnings Detail Modal */}
             {viewingEarnings && earningsData && (

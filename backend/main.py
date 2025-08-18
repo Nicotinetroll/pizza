@@ -4,9 +4,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 import secrets
+import traceback
 import jwt
 import os
 import asyncio
@@ -100,6 +101,9 @@ class MessageTemplateModel(BaseModel):
     type: str = "normal"
     enabled: bool = True
 
+class AssignSellerModel(BaseModel):
+    seller_id: str
+    
 # Helper functions
 def format_price(value):
     """Format price to 2 decimal places"""
@@ -122,7 +126,7 @@ def generate_referral_code():
 
 # Auth functions
 def create_token(email: str) -> str:
-    expiration = datetime.utcnow() + timedelta(hours=24)
+    expiration = datetime.now(timezone.utc) + timedelta(hours=24)
     payload = {"email": email, "exp": expiration}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -171,16 +175,16 @@ async def create_category(category: CategoryModel, email: str = Depends(verify_t
     if existing:
         raise HTTPException(status_code=400, detail="Category name already exists")
     
-    category_dict = category.dict()
-    category_dict["created_at"] = datetime.utcnow()
+    category_dict = category.model_dump()
+    category_dict["created_at"] = datetime.now(timezone.utc)
     
     result = await db.categories.insert_one(category_dict)
     return {"id": str(result.inserted_id), "message": "Category created"}
 
 @app.put("/api/categories/{category_id}")
 async def update_category(category_id: str, category: CategoryModel, email: str = Depends(verify_token)):
-    category_dict = category.dict()
-    category_dict["updated_at"] = datetime.utcnow()
+    category_dict = category.model_dump()
+    category_dict["updated_at"] = datetime.now(timezone.utc)
     
     result = await db.categories.update_one(
         {"_id": ObjectId(category_id)},
@@ -240,10 +244,10 @@ async def get_products(skip: int = 0, limit: int = 100, category_id: Optional[st
 
 @app.post("/api/products")
 async def create_product(product: ProductModel, email: str = Depends(verify_token)):
-    product_dict = product.dict()
+    product_dict = product.model_dump()
     product_dict["price_usdt"] = format_price(product_dict["price_usdt"])
     product_dict["purchase_price_usdt"] = format_price(product_dict.get("purchase_price_usdt", 0))
-    product_dict["created_at"] = datetime.utcnow()
+    product_dict["created_at"] = datetime.now(timezone.utc)
     product_dict["sold_count"] = 0
     
     if product_dict.get("category_id"):
@@ -254,10 +258,10 @@ async def create_product(product: ProductModel, email: str = Depends(verify_toke
 
 @app.put("/api/products/{product_id}")
 async def update_product(product_id: str, product: ProductModel, email: str = Depends(verify_token)):
-    product_dict = product.dict()
+    product_dict = product.model_dump()
     product_dict["price_usdt"] = format_price(product_dict["price_usdt"])
     product_dict["purchase_price_usdt"] = format_price(product_dict.get("purchase_price_usdt", 0))
-    product_dict["updated_at"] = datetime.utcnow()
+    product_dict["updated_at"] = datetime.now(timezone.utc)
     
     if product_dict.get("category_id"):
         product_dict["category_id"] = ObjectId(product_dict["category_id"])
@@ -281,7 +285,7 @@ async def get_referrals(skip: int = 0, limit: int = 100):
     for referral in referrals:
         referral["_id"] = str(referral["_id"])
         if referral.get("valid_until"):
-            referral["is_expired"] = referral["valid_until"] < datetime.utcnow()
+            referral["is_expired"] = referral["valid_until"] < datetime.now(timezone.utc)
         else:
             referral["is_expired"] = False
     
@@ -298,9 +302,9 @@ async def create_referral(referral: ReferralCodeModel, email: str = Depends(veri
     if existing:
         raise HTTPException(status_code=400, detail="Referral code already exists")
     
-    referral_dict = referral.dict()
+    referral_dict = referral.model_dump()
     referral_dict["code"] = code
-    referral_dict["created_at"] = datetime.utcnow()
+    referral_dict["created_at"] = datetime.now(timezone.utc)
     referral_dict["created_by"] = email
     referral_dict["used_count"] = 0
     
@@ -316,9 +320,9 @@ async def create_referral(referral: ReferralCodeModel, email: str = Depends(veri
 
 @app.put("/api/referrals/{referral_id}")
 async def update_referral(referral_id: str, referral: ReferralCodeModel, email: str = Depends(verify_token)):
-    referral_dict = referral.dict()
+    referral_dict = referral.model_dump()
     referral_dict["code"] = referral_dict["code"].upper()
-    referral_dict["updated_at"] = datetime.utcnow()
+    referral_dict["updated_at"] = datetime.now(timezone.utc)
     
     result = await db.referral_codes.update_one(
         {"_id": ObjectId(referral_id)},
@@ -394,7 +398,7 @@ async def update_order_status(order_id: str, status_update: OrderStatusModel, em
             {
                 "$set": {
                     "status": new_status,
-                    "updated_at": datetime.utcnow()
+                    "updated_at": datetime.now(timezone.utc)
                 }
             }
         )
@@ -423,52 +427,149 @@ async def update_order_status(order_id: str, status_update: OrderStatusModel, em
         raise HTTPException(status_code=400, detail=str(e))
 
 # USER ENDPOINTS
+# USER ENDPOINTS - OPRAVENÁ VERZIA
 @app.get("/api/users")
 async def get_users(skip: int = 0, limit: int = 100, vip_only: bool = False):
-    query = {}
-    if vip_only:
-        query["is_vip"] = True
-    
-    users = await db.users.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    for user in users:
-        user["_id"] = str(user["_id"])
+    """Get all users with complete error handling"""
+    try:
+        query = {}
+        if vip_only:
+            query["is_vip"] = True
         
-        total_spent = await db.orders.aggregate([
-            {
-                "$match": {
-                    "telegram_id": user["telegram_id"],
+        users = await db.users.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+        
+        for user in users:
+            # Convert ObjectId to string
+            user["_id"] = str(user["_id"])
+            
+            # Ensure telegram_id exists
+            if "telegram_id" not in user:
+                logger.warning(f"User {user['_id']} has no telegram_id")
+                user["telegram_id"] = 0
+            
+            # Calculate total spent with error handling
+            try:
+                total_spent_pipeline = [
+                    {
+                        "$match": {
+                            "telegram_id": user["telegram_id"],
+                            "status": {"$in": ["paid", "completed"]}
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "total": {"$sum": "$total_usdt"}
+                        }
+                    }
+                ]
+                
+                total_spent_result = await db.orders.aggregate(total_spent_pipeline).to_list(1)
+                user["total_spent_usdt"] = format_price(
+                    total_spent_result[0]["total"] if total_spent_result and len(total_spent_result) > 0 else 0
+                )
+            except Exception as e:
+                logger.error(f"Error calculating total spent for user {user.get('telegram_id')}: {e}")
+                user["total_spent_usdt"] = 0
+            
+            # Count total orders with error handling
+            try:
+                user["total_orders"] = await db.orders.count_documents({
+                    "telegram_id": user.get("telegram_id", 0),
                     "status": {"$in": ["paid", "completed"]}
-                }
-            },
-            {
-                "$group": {
-                    "_id": None,
-                    "total": {"$sum": "$total_usdt"}
-                }
-            }
-        ]).to_list(1)
+                })
+            except Exception as e:
+                logger.error(f"Error counting orders for user {user.get('telegram_id')}: {e}")
+                user["total_orders"] = 0
+            
+            # Set default values for all fields
+            user["username"] = user.get("username", "")
+            user["first_name"] = user.get("first_name", "")
+            user["last_name"] = user.get("last_name", "")
+            user["status"] = user.get("status", "active")
+            user["referrals_used"] = user.get("referrals_used", [])
+            user["is_vip"] = user.get("is_vip", False)
+            user["vip_discount_percentage"] = user.get("vip_discount_percentage", 0)
+            user["vip_notes"] = user.get("vip_notes", "")
+            
+            # Handle created_at - ensure it's a valid datetime
+            if "created_at" not in user or user["created_at"] is None:
+                user["created_at"] = datetime.now(timezone.utc)
+            
+            # Ensure created_at is serializable
+            if hasattr(user["created_at"], 'isoformat'):
+                user["created_at"] = user["created_at"].isoformat()
+            
+            # VIP status check with comprehensive error handling
+            user["vip_status"] = "none"  # Default value
+            
+            try:
+                if user.get("vip_expires"):
+                    vip_expires = user["vip_expires"]
+                    
+                    # Convert string to datetime if needed
+                    if isinstance(vip_expires, str):
+                        try:
+                            # Handle ISO format with Z or +00:00
+                            vip_expires = datetime.fromisoformat(vip_expires.replace('Z', '+00:00'))
+                        except:
+                            # Try parsing without timezone
+                            vip_expires = datetime.fromisoformat(vip_expires.split('+')[0])
+                            vip_expires = vip_expires.replace(tzinfo=timezone.utc)
+                    
+                    # Ensure timezone-aware
+                    if hasattr(vip_expires, 'tzinfo'):
+                        if vip_expires.tzinfo is None:
+                            vip_expires = vip_expires.replace(tzinfo=timezone.utc)
+                    else:
+                        # If it's not a datetime at all, remove it
+                        del user["vip_expires"]
+                        user["vip_status"] = "active" if user.get("is_vip") else "none"
+                        continue
+                    
+                    # Compare with current time
+                    current_time = datetime.now(timezone.utc)
+                    if vip_expires < current_time:
+                        user["vip_status"] = "expired"
+                    else:
+                        user["vip_status"] = "active"
+                    
+                    # Convert to ISO string for JSON
+                    user["vip_expires"] = vip_expires.isoformat()
+                    
+                elif user.get("is_vip"):
+                    user["vip_status"] = "active"
+                else:
+                    user["vip_status"] = "none"
+                    
+            except Exception as e:
+                logger.error(f"Error processing VIP status for user {user.get('_id')}: {e}")
+                # Safe fallback
+                user["vip_status"] = "active" if user.get("is_vip") else "none"
+                # Remove problematic vip_expires
+                if "vip_expires" in user:
+                    del user["vip_expires"]
         
-        user["total_spent_usdt"] = format_price(total_spent[0]["total"] if total_spent else 0)
+        # Get total count
+        total = await db.users.count_documents(query)
         
-        user["total_orders"] = await db.orders.count_documents({
-            "telegram_id": user["telegram_id"],
-            "status": {"$in": ["paid", "completed"]}
-        })
+        return {
+            "users": users,
+            "total": total,
+            "success": True
+        }
         
-        user["referrals_used"] = user.get("referrals_used", [])
-        user["is_vip"] = user.get("is_vip", False)
-        user["vip_discount_percentage"] = user.get("vip_discount_percentage", 0)
+    except Exception as e:
+        logger.error(f"Critical error in get_users: {str(e)}")
+        logger.error(traceback.format_exc())
         
-        if user.get("vip_expires") and user["vip_expires"] < datetime.utcnow():
-            user["vip_status"] = "expired"
-        elif user.get("is_vip"):
-            user["vip_status"] = "active"
-        else:
-            user["vip_status"] = "none"
-    
-    total = await db.users.count_documents(query)
-    return {"users": users, "total": total}
+        # Return empty result to keep frontend working
+        return {
+            "users": [],
+            "total": 0,
+            "success": False,
+            "error": str(e)
+        }
 
 # VIP MANAGEMENT
 @app.patch("/api/users/{user_id}/vip")
@@ -484,11 +585,11 @@ async def update_user_vip_status(user_id: str, vip_data: VIPUpdateModel, email: 
         update_data = {
             "is_vip": vip_data.is_vip,
             "vip_discount_percentage": vip_data.vip_discount_percentage,
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now(timezone.utc)
         }
         
         if vip_data.is_vip and not user.get("is_vip"):
-            update_data["vip_since"] = datetime.utcnow()
+            update_data["vip_since"] = datetime.now(timezone.utc)
         
         if vip_data.vip_expires:
             update_data["vip_expires"] = vip_data.vip_expires
@@ -519,7 +620,7 @@ async def update_user_vip_status(user_id: str, vip_data: VIPUpdateModel, email: 
                 "is_vip": vip_data.is_vip,
                 "vip_discount_percentage": vip_data.vip_discount_percentage
             },
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone.utc)
         })
         
         return {"success": True, "message": "VIP status updated"}
@@ -533,7 +634,7 @@ async def get_vip_users(email: str = Depends(verify_token)):
         "is_vip": True,
         "$or": [
             {"vip_expires": None},
-            {"vip_expires": {"$gt": datetime.utcnow()}}
+            {"vip_expires": {"$gt": datetime.now(timezone.utc)}}
         ]
     }).to_list(100)
     
@@ -577,11 +678,11 @@ async def get_stats():
         "is_vip": True,
         "$or": [
             {"vip_expires": None},
-            {"vip_expires": {"$gt": datetime.utcnow()}}
+            {"vip_expires": {"$gt": datetime.now(timezone.utc)}}
         ]
     })
     
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_orders = await db.orders.count_documents({
         "created_at": {"$gte": today_start},
         "status": {"$in": ["paid", "completed"]}
@@ -629,7 +730,7 @@ async def get_stats():
 # ANALYTICS
 @app.get("/api/dashboard/analytics")
 async def get_analytics(days: int = 30):
-    end_date = datetime.utcnow()
+    end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=days)
     
     pipeline = [
@@ -757,22 +858,23 @@ async def get_sellers(email: str = Depends(verify_token)):
         }).to_list(100)
         
         seller["referral_codes"] = []
-        total_earnings = 0
-        pending_earnings = 0
+        total_commission = 0
+        total_sales = 0
+        pending_commission = 0
         total_orders = 0
         
         for code in referral_codes:
             code["_id"] = str(code["_id"])
-            
-            # Get orders that used this code
             orders = await db.orders.find({
                 "referral_code": code["code"],
                 "status": {"$in": ["paid", "completed"]}
             }).to_list(1000)
             
-            code_earnings = 0
+            code_commission = 0
+            code_sales = 0
+            
             for order in orders:
-                # Calculate profit for this order
+                code_sales += order.get("total_usdt", 0)
                 profit = 0
                 if order.get("items"):
                     for item in order["items"]:
@@ -783,42 +885,48 @@ async def get_sellers(email: str = Depends(verify_token)):
                             item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
                             profit += item_profit
                 
-                # Calculate seller commission
-                commission = profit * (seller.get("commission_percentage", 30) / 100)
-                code_earnings += commission
+                actual_commission_rate = seller.get("commission_percentage", 30)
+                commission = profit * (actual_commission_rate / 100)
+                code_commission += commission
                 total_orders += 1
             
-            code["total_earnings"] = format_price(code_earnings)
+            code["total_commission"] = format_price(code_commission)
+            code["total_sales"] = format_price(code_sales)
             code["uses"] = len(orders)
+            
             seller["referral_codes"].append({
                 "code": code["code"],
-                "earnings": format_price(code_earnings),
+                "commission": format_price(code_commission),
+                "sales": format_price(code_sales),
                 "uses": len(orders)
             })
             
-            total_earnings += code_earnings
+            total_commission += code_commission
+            total_sales += code_sales
         
-        # Get pending earnings (not yet paid out)
         payouts = await db.seller_payouts.find({
             "seller_id": seller["_id"]
         }).to_list(100)
         
         total_paid = sum(p.get("amount", 0) for p in payouts)
-        pending_earnings = total_earnings - total_paid
+        pending_commission = total_commission - total_paid
         
-        seller["total_earnings"] = format_price(total_earnings)
-        seller["pending_earnings"] = format_price(pending_earnings)
+        seller["total_sales"] = format_price(total_sales)
+        seller["total_commission"] = format_price(total_commission)
+        seller["total_earnings"] = format_price(total_commission)
+        seller["pending_earnings"] = format_price(pending_commission)
         seller["total_paid"] = format_price(total_paid)
         seller["total_orders"] = total_orders
-        seller["created_at"] = seller.get("created_at", datetime.utcnow())
+        seller["commission_percentage"] = seller.get("commission_percentage", 30)
+        seller["created_at"] = seller.get("created_at", datetime.now(timezone.utc))
     
     return {"sellers": sellers, "total": len(sellers)}
 
 @app.post("/api/sellers")
 async def create_seller(seller: SellerModel, email: str = Depends(verify_token)):
     """Create new seller"""
-    seller_dict = seller.dict()
-    seller_dict["created_at"] = datetime.utcnow()
+    seller_dict = seller.model_dump()
+    seller_dict["created_at"] = datetime.now(timezone.utc)
     seller_dict["created_by"] = email
     seller_dict["total_earnings"] = 0
     seller_dict["pending_earnings"] = 0
@@ -831,7 +939,7 @@ async def create_seller(seller: SellerModel, email: str = Depends(verify_token))
         "action": "CREATE_SELLER",
         "entity_type": "seller",
         "entity_id": result.inserted_id,
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.now(timezone.utc)
     })
     
     return {"id": str(result.inserted_id), "message": "Seller created successfully"}
@@ -843,8 +951,8 @@ async def update_seller(
     email: str = Depends(verify_token)
 ):
     """Update seller details"""
-    seller_dict = seller.dict()
-    seller_dict["updated_at"] = datetime.utcnow()
+    seller_dict = seller.model_dump()
+    seller_dict["updated_at"] = datetime.now(timezone.utc)
     
     result = await db.sellers.update_one(
         {"_id": ObjectId(seller_id)},
@@ -861,7 +969,7 @@ async def delete_seller(seller_id: str, email: str = Depends(verify_token)):
     """Delete seller (soft delete - just deactivate)"""
     result = await db.sellers.update_one(
         {"_id": ObjectId(seller_id)},
-        {"$set": {"is_active": False, "deleted_at": datetime.utcnow()}}
+        {"$set": {"is_active": False, "deleted_at": datetime.now(timezone.utc)}}
     )
     
     if result.modified_count == 0:
@@ -873,16 +981,16 @@ async def delete_seller(seller_id: str, email: str = Depends(verify_token)):
 @app.post("/api/referrals/{referral_id}/assign-seller")
 async def assign_seller_to_referral(
     referral_id: str,
-    seller_id: str,
+    assign_data: AssignSellerModel,
     email: str = Depends(verify_token)
 ):
     """Assign a referral code to a seller"""
-    # Check if seller exists
+    seller_id = assign_data.seller_id
+    
     seller = await db.sellers.find_one({"_id": ObjectId(seller_id)})
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
     
-    # Update referral code
     result = await db.referral_codes.update_one(
         {"_id": ObjectId(referral_id)},
         {
@@ -890,7 +998,7 @@ async def assign_seller_to_referral(
                 "seller_id": seller_id,
                 "seller_name": seller["name"],
                 "commission_percentage": seller.get("commission_percentage", 30),
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now(timezone.utc)
             }
         }
     )
@@ -924,7 +1032,7 @@ async def get_seller_earnings(seller_id: str, email: str = Depends(verify_token)
         }).sort("created_at", -1).to_list(100)
         
         for order in orders:
-            # Calculate profit
+            # Calculate REAL profit
             profit = 0
             if order.get("items"):
                 for item in order["items"]:
@@ -935,8 +1043,9 @@ async def get_seller_earnings(seller_id: str, email: str = Depends(verify_token)
                         item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
                         profit += item_profit
             
-            # Calculate commission
-            commission = profit * (seller.get("commission_percentage", 30) / 100)
+            # Calculate commission using ACTUAL seller percentage
+            actual_commission_rate = seller.get("commission_percentage", 30)
+            commission = profit * (actual_commission_rate / 100)
             total_earnings += commission
             
             earnings_details.append({
@@ -945,7 +1054,7 @@ async def get_seller_earnings(seller_id: str, email: str = Depends(verify_token)
                 "date": order.get("created_at"),
                 "order_total": format_price(order.get("total_usdt", 0)),
                 "order_profit": format_price(profit),
-                "commission_rate": seller.get("commission_percentage", 30),
+                "commission_rate": actual_commission_rate,  # Use actual rate
                 "commission_earned": format_price(commission),
                 "referral_code": code["code"],
                 "status": order.get("status")
@@ -1000,10 +1109,10 @@ async def create_payout(
         )
     
     # Create payout record
-    payout_dict = payout.dict()
+    payout_dict = payout.model_dump()
     payout_dict["seller_id"] = seller_id
     payout_dict["seller_name"] = seller["name"]
-    payout_dict["created_at"] = datetime.utcnow()
+    payout_dict["created_at"] = datetime.now(timezone.utc)
     payout_dict["created_by"] = email
     payout_dict["status"] = "completed"
     
@@ -1019,7 +1128,7 @@ async def create_payout(
             "amount": payout.amount,
             "method": payout.payment_method
         },
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.now(timezone.utc)
     })
     
     return {
@@ -1065,7 +1174,7 @@ async def get_sellers_stats(email: str = Depends(verify_token)):
         total_pending += float(earnings["summary"]["pending_payout"])
     
     # Get this month's payouts
-    month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0)
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0)
     monthly_payouts = await db.seller_payouts.aggregate([
         {"$match": {"created_at": {"$gte": month_start}}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
@@ -1085,7 +1194,7 @@ async def get_top_sellers():
     seller_earnings = []
     
     for seller in sellers:
-        earnings = 0
+        total_commission = 0
         codes = await db.referral_codes.find({"seller_id": str(seller["_id"])}).to_list(100)
         
         for code in codes:
@@ -1095,15 +1204,25 @@ async def get_top_sellers():
             }).to_list(100)
             
             for order in orders:
-                # Calculate profit (simplified)
-                profit = order.get("total_usdt", 0) * 0.5  # Assume 50% profit margin
-                commission = profit * (seller.get("commission_percentage", 30) / 100)
-                earnings += commission
+                actual_profit = 0
+                if order.get("items"):
+                    for item in order["items"]:
+                        product = await db.products.find_one({"name": item["product_name"]})
+                        if product:
+                            purchase_price = product.get("purchase_price_usdt", 0)
+                            selling_price = item.get("price_usdt", 0)
+                            quantity = item.get("quantity", 1)
+                            item_profit = (selling_price - purchase_price) * quantity
+                            actual_profit += item_profit
+                
+                seller_commission_rate = seller.get("commission_percentage", 30)
+                commission = actual_profit * (seller_commission_rate / 100)
+                total_commission += commission
         
-        if earnings > 0:
+        if total_commission > 0:
             seller_earnings.append({
                 "name": seller["name"],
-                "earnings": format_price(earnings)
+                "earnings": format_price(total_commission)
             })
     
     # Sort by earnings and return top 5
@@ -1135,8 +1254,8 @@ async def update_notification_settings(
     settings: NotificationSettingsModel,
     email: str = Depends(verify_token)
 ):
-    settings_dict = settings.dict()
-    settings_dict["updated_at"] = datetime.utcnow()
+    settings_dict = settings.model_dump()
+    settings_dict["updated_at"] = datetime.now(timezone.utc)
     settings_dict["updated_by"] = email
     
     await db.notification_settings.update_one(
@@ -1152,8 +1271,8 @@ async def add_message_template(
     template: MessageTemplateModel,
     email: str = Depends(verify_token)
 ):
-    template_dict = template.dict()
-    template_dict["created_at"] = datetime.utcnow()
+    template_dict = template.model_dump()
+    template_dict["created_at"] = datetime.now(timezone.utc)
     
     await db.notification_settings.update_one(
         {"_id": "main"},
