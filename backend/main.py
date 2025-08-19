@@ -1403,17 +1403,6 @@ class ConnectionManager:
                 await self.active_connections[admin_id].send_json(message)
             except:
                 await self.disconnect(admin_id)
-    
-    async def broadcast(self, message: dict):
-        disconnected = []
-        for admin_id, connection in self.active_connections.items():
-            try:
-                await connection.send_json(message)
-            except:
-                disconnected.append(admin_id)
-        
-        for admin_id in disconnected:
-            await self.disconnect(admin_id)
 
 manager = ConnectionManager()
 
@@ -1431,19 +1420,12 @@ class ChatStatusModel(BaseModel):
 
 @app.websocket("/ws/chat/{admin_email}")
 async def websocket_endpoint(websocket: WebSocket, admin_email: str):
-    """WebSocket for real-time chat"""
     await manager.connect(websocket, admin_email)
     try:
         while True:
-            # Keep connection alive and handle incoming messages
             data = await websocket.receive_json()
-            
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
-            elif data.get("type") == "typing":
-                # Handle typing indicator
-                pass
-                
     except WebSocketDisconnect:
         await manager.disconnect(admin_email)
     except Exception as e:
