@@ -5,12 +5,14 @@ import asyncio
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bson import ObjectId
+from datetime import datetime
+import logging
 
 from .config import MESSAGES
 from .database import (
     create_or_update_user, get_active_categories, get_products_by_category,
     get_product_by_id, get_user_orders, get_user_stats,
-    validate_referral_code, calculate_discount, get_user_vip_status
+    validate_referral_code, calculate_discount, get_user_vip_status, db
 )
 from .keyboards import (
     get_main_menu_keyboard, get_categories_keyboard, get_products_keyboard,
@@ -19,13 +21,86 @@ from .keyboards import (
 )
 from .cart_manager import cart_manager
 
+# Setup logger
+logger = logging.getLogger(__name__)
+
 # User states storage for conversation flow
 user_states = {}
 user_context = {}  # Store category context
 
+# IMPORTANT: Define save_chat_message at module level
+# In your handlers.py, update the save_chat_message function:
+
+async def save_chat_message(telegram_id: int, username: str, message: str, direction: str = "incoming", first_name: str = None, last_name: str = None):
+    """Save chat message to database and broadcast via WebSocket"""
+    try:
+        from datetime import datetime
+        
+        message_doc = {
+            "telegram_id": telegram_id,
+            "username": username or f"user{telegram_id}",
+            "first_name": first_name,
+            "last_name": last_name,
+            "message": message,
+            "direction": direction,
+            "timestamp": datetime.utcnow(),
+            "read": False if direction == "incoming" else True
+        }
+        
+        result = await db.chat_messages.insert_one(message_doc)
+        message_doc["_id"] = str(result.inserted_id)
+        logger.info(f"Saved {direction} message from {telegram_id}: {message[:50]}...")
+        
+        # Broadcast to WebSocket - IMPORTANT: Always try to broadcast
+        try:
+            # Try to import and use the manager
+            import sys
+            import os
+            # Add parent directory to path to import from main
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from main import manager
+            
+            # Format message for WebSocket
+            broadcast_message = {
+                "type": "new_message",
+                "message": {
+                    "_id": str(result.inserted_id),
+                    "telegram_id": telegram_id,
+                    "username": username or f"user{telegram_id}",
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "message": message,
+                    "direction": direction,
+                    "timestamp": message_doc["timestamp"].isoformat(),
+                    "read": message_doc["read"]
+                }
+            }
+            
+            # Broadcast to all connected admins
+            await manager.broadcast(broadcast_message)
+            logger.info(f"✅ Broadcasted {direction} message to WebSocket")
+            
+        except ImportError as e:
+            logger.warning(f"Could not import manager: {e}")
+        except Exception as ws_err:
+            logger.error(f"WebSocket broadcast error: {ws_err}")
+            
+    except Exception as e:
+        logger.error(f"Error saving chat message: {e}")
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with warm welcome"""
     user = update.effective_user
+    
+    # Save incoming command
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message="/start",
+        direction="incoming",
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
     
     # Save user to database
     await create_or_update_user({
@@ -51,6 +126,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = get_main_menu_keyboard()
     
+    # Save outgoing message
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message=welcome_text,
+        direction="outgoing"
+    )
+    
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
     elif update.callback_query:
@@ -58,6 +141,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /shop command - show categories"""
+    user = update.effective_user
+    
+    # Save incoming command
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message="/shop",
+        direction="incoming",
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
     await show_categories(update, context)
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -70,6 +165,16 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = MESSAGES["shop_categories"]
         keyboard = get_categories_keyboard(categories)
+    
+    # Save outgoing message if from command
+    if update.message:
+        user = update.effective_user
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message=text,
+            direction="outgoing"
+        )
     
     if update.callback_query:
         try:
@@ -204,11 +309,35 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /cart command"""
+    user = update.effective_user
+    
+    # Save incoming command
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message="/cart",
+        direction="incoming",
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
     await show_cart(update, context)
 
 async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /orders command with better formatting"""
-    user_id = update.effective_user.id
+    user = update.effective_user
+    user_id = user.id
+    
+    # Save incoming command
+    await save_chat_message(
+        telegram_id=user_id,
+        username=user.username,
+        message="/orders",
+        direction="incoming",
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
     orders = await get_user_orders(user_id, limit=10)
     stats = await get_user_stats(user_id)
     
@@ -239,11 +368,39 @@ async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
     ])
     
+    # Save outgoing message
+    await save_chat_message(
+        telegram_id=user_id,
+        username=user.username,
+        message=text,
+        direction="outgoing"
+    )
+    
     await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
+    user = update.effective_user
+    
+    # Save incoming command
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message="/help",
+        direction="incoming",
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
     keyboard = get_main_menu_keyboard()
+    
+    # Save outgoing message
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message=MESSAGES["help"],
+        direction="outgoing"
+    )
     
     if update.message:
         await update.message.reply_text(MESSAGES["help"], parse_mode='Markdown', reply_markup=keyboard)
@@ -253,8 +410,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages based on user state"""
     user_id = update.effective_user.id
+    username = update.effective_user.username or f"user{user_id}"
+    first_name = update.effective_user.first_name
+    last_name = update.effective_user.last_name
     text = update.message.text.strip()
     state = user_states.get(user_id)
+    
+    # Save incoming message
+    await save_chat_message(
+        telegram_id=user_id,
+        username=username,
+        message=text,
+        direction="incoming",
+        first_name=first_name,
+        last_name=last_name
+    )
     
     if state == "waiting_city":
         await handle_city_input(update, context, text)
@@ -262,9 +432,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_referral_input(update, context, text)
     else:
         # Default response for unexpected messages
+        response_text = (
+            "Hey! I didn't quite understand that. 🤔\n\n"
+            "Here's what I can help you with:\n"
+            "• /shop - Browse our products\n"
+            "• /cart - Check your cart\n"
+            "• /orders - View your orders\n"
+            "• /help - Get help\n\n"
+            "Or just click the buttons below! 👇"
+        )
+        
         await update.message.reply_text(
-            "Use the menu buttons or commands:\n/shop /cart /orders /help",
+            response_text,
             reply_markup=get_main_menu_keyboard()
+        )
+        
+        # Save bot response
+        await save_chat_message(
+            telegram_id=user_id,
+            username=username,
+            message=response_text,
+            direction="outgoing"
         )
 
 async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str):
@@ -286,11 +474,20 @@ async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     # Ask for referral code
     country = context.user_data.get('delivery_country', 'Unknown')
     
+    response_text = f"✅ Shipping to: {city}, {country}\n" + MESSAGES["ask_referral"]
+    
     await update.message.reply_text(
-        f"✅ Shipping to: {city}, {country}\n" + 
-        MESSAGES["ask_referral"],
+        response_text,
         reply_markup=get_referral_keyboard(),
         parse_mode='Markdown'
+    )
+    
+    # Save bot response
+    await save_chat_message(
+        telegram_id=user_id,
+        username=update.effective_user.username,
+        message=response_text,
+        direction="outgoing"
     )
 
 async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str):
@@ -309,13 +506,18 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
         
         # If VIP, show that VIP discount is better
         if vip_status["is_vip"] and vip_status["discount"] > 0:
-            await update.message.reply_text(
+            response_text = (
                 f"👑 *You already have VIP {vip_status['discount']}% discount!*\n"
                 f"This is better than the referral code.\n\n"
-                + MESSAGES["payment_select"],
+                + MESSAGES["payment_select"]
+            )
+            
+            await update.message.reply_text(
+                response_text,
                 reply_markup=get_payment_keyboard(),
                 parse_mode='Markdown'
             )
+            
             context.user_data['referral_code'] = None
             context.user_data['discount_amount'] = 0
             context.user_data['final_total'] = total
@@ -345,143 +547,37 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
             from .keyboards import get_payment_keyboard
             keyboard = get_payment_keyboard()
             
-            await update.message.reply_text(
-                text + "\n" + MESSAGES["payment_select"],
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
-    else:
-        # Invalid code
-        await update.message.reply_text(
-            MESSAGES["referral_invalid"],
-            reply_markup=get_referral_keyboard(),
-            parse_mode='Markdown'
-        )
-    
-    user_states[user_id] = None
-    
-    async def save_chat_message(telegram_id: int, username: str, message: str, direction: str = "incoming", first_name: str = None, last_name: str = None):
-        """Save chat message to database"""
-        try:
-            message_doc = {
-                "telegram_id": telegram_id,
-                "username": username,
-                "first_name": first_name,
-                "last_name": last_name,
-                "message": message,
-                "direction": direction,
-                "timestamp": datetime.utcnow(),
-                "read": False if direction == "incoming" else True
-            }
-            
-            await db.chat_messages.insert_one(message_doc)
-            logger.info(f"Saved {direction} message from {telegram_id}")
-            
-            # If it's an incoming message, notify admins via WebSocket
-            if direction == "incoming":
-                # This would need WebSocket implementation
-                pass
-                
-        except Exception as e:
-            logger.error(f"Error saving chat message: {e}")
-    
-    async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages based on user state - UPDATED with chat logging"""
-        user_id = update.effective_user.id
-        username = update.effective_user.username or f"user{user_id}"
-        first_name = update.effective_user.first_name
-        last_name = update.effective_user.last_name
-        text = update.message.text.strip()
-        state = user_states.get(user_id)
-        
-        # Save incoming message to chat database
-        await save_chat_message(
-            telegram_id=user_id,
-            username=username,
-            message=text,
-            direction="incoming",
-            first_name=first_name,
-            last_name=last_name
-        )
-        
-        # Handle different states
-        if state == "waiting_city":
-            await handle_city_input(update, context, text)
-        elif state == "waiting_referral":
-            await handle_referral_input(update, context, text)
-        else:
-            # Default response for unexpected messages - now more friendly
-            response_text = (
-                "Hey! I didn't quite understand that. 🤔\n\n"
-                "Here's what I can help you with:\n"
-                "• /shop - Browse our products\n"
-                "• /cart - Check your cart\n"
-                "• /orders - View your orders\n"
-                "• /help - Get help\n\n"
-                "Or just click the buttons below! 👇"
-            )
+            response_text = text + "\n" + MESSAGES["payment_select"]
             
             await update.message.reply_text(
                 response_text,
-                reply_markup=get_main_menu_keyboard()
+                reply_markup=keyboard,
+                parse_mode='Markdown'
             )
-            
-            # Save bot's response too
-            await save_chat_message(
-                telegram_id=user_id,
-                username=username,
-                message=response_text,
-                direction="outgoing"
-            )
-    
-    async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command with warm welcome - UPDATED with chat logging"""
-        user = update.effective_user
         
-        # Save incoming command
+        # Save bot response
         await save_chat_message(
-            telegram_id=user.id,
-            username=user.username or f"user{user.id}",
-            message="/start",
-            direction="incoming",
-            first_name=user.first_name,
-            last_name=user.last_name
-        )
-        
-        # Save user to database
-        await create_or_update_user({
-            "telegram_id": user.id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "last_name": user.last_name
-        })
-        
-        # Get user stats and VIP status
-        stats = await get_user_stats(user.id)
-        vip_status = await get_user_vip_status(user.id)
-        
-        welcome_text = MESSAGES["welcome"].format(name=user.first_name or "Bro")
-        
-        # Add returning customer message
-        if stats["total_orders"] > 0:
-            welcome_text += f"\n🎉 *Welcome back!* Orders: {stats['total_orders']}"
-        
-        # Add VIP status
-        if vip_status["is_vip"]:
-            welcome_text += f"\n👑 *VIP Member* - {vip_status['discount']}% OFF on everything!"
-        
-        keyboard = get_main_menu_keyboard()
-        
-        # Save outgoing response
-        await save_chat_message(
-            telegram_id=user.id,
-            username=user.username or f"user{user.id}",
-            message=welcome_text,
+            telegram_id=user_id,
+            username=update.effective_user.username,
+            message=response_text,
             direction="outgoing"
         )
+    else:
+        # Invalid code
+        response_text = MESSAGES["referral_invalid"]
         
-        if update.message:
-            await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
+        await update.message.reply_text(
+            response_text,
+            reply_markup=get_referral_keyboard(),
+            parse_mode='Markdown'
+        )
+        
+        # Save bot response
+        await save_chat_message(
+            telegram_id=user_id,
+            username=update.effective_user.username,
+            message=response_text,
+            direction="outgoing"
+        )
     
+    user_states[user_id] = None

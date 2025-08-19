@@ -307,7 +307,7 @@ export const sellersAPI = {
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       throw new Error('Invalid seller ID');
     }
-    
+
     const url = hardDelete
         ? `/sellers/${id}?hard=true`
         : `/sellers/${id}`;
@@ -517,31 +517,65 @@ export class ChatWebSocket {
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
     this.pingInterval = null;
+    this.isIntentionalDisconnect = false;
   }
 
   connect() {
     const token = localStorage.getItem('token');
-    if (!token) return;
+    if (!token) {
+      console.warn('No token found, skipping WebSocket connection');
+      return;
+    }
 
     // Parse token to get email
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       const email = payload.email;
 
-      // Use WSS in production, WS in development
+      // Build WebSocket URL
+      let wsUrl;
+
+      // Get the current location
+      const currentHost = window.location.hostname;
+      const currentPort = window.location.port;
+
+      // IMPORTANT: Always use the current port - Vite will proxy it
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(email)}`;
+
+      if (currentPort) {
+        // If there's a port (like 3000 for dev), include it
+        wsUrl = `${protocol}//${currentHost}:${currentPort}/ws/chat/${encodeURIComponent(email)}`;
+      } else {
+        // No port means we're on standard 80/443
+        wsUrl = `${protocol}//${currentHost}/ws/chat/${encodeURIComponent(email)}`;
+      }
+
+      console.log('Attempting WebSocket connection to:', wsUrl);
 
       this.ws = new WebSocket(wsUrl);
 
+      // Set a connection timeout
+      const connectionTimeout = setTimeout(() => {
+        if (this.ws.readyState !== WebSocket.OPEN) {
+          console.warn('WebSocket connection timeout, closing...');
+          this.ws.close();
+        }
+      }, 5000);
+
       this.ws.onopen = () => {
-        console.log('Chat WebSocket connected');
+        clearTimeout(connectionTimeout);
+        console.log('Chat WebSocket connected successfully');
         this.reconnectAttempts = 0;
+        this.reconnectDelay = 1000; // Reset delay
 
         // Start ping interval to keep connection alive
         this.pingInterval = setInterval(() => {
-          if (this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ type: 'ping' }));
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            try {
+              this.ws.send(JSON.stringify({ type: 'ping' }));
+            } catch (e) {
+              console.error('Error sending ping:', e);
+            }
           }
         }, 30000); // Ping every 30 seconds
       };
@@ -557,43 +591,83 @@ export class ChatWebSocket {
         }
       };
 
-      this.ws.onclose = () => {
-        console.log('Chat WebSocket disconnected');
+      this.ws.onclose = (event) => {
+        clearTimeout(connectionTimeout);
+        console.log('Chat WebSocket disconnected', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean
+        });
+
         this.cleanup();
-        this.reconnect();
+
+        // Only reconnect if it wasn't an intentional disconnect
+        if (!this.isIntentionalDisconnect && event.code !== 1000 && event.code !== 1001) {
+          this.reconnect();
+        }
       };
 
       this.ws.onerror = (error) => {
-        console.error('Chat WebSocket error:', error);
+        console.error('Chat WebSocket error event (this is normal before close)');
+        clearTimeout(connectionTimeout);
       };
 
     } catch (error) {
-      console.error('Error connecting to chat WebSocket:', error);
+      console.error('Error setting up WebSocket connection:', error);
     }
   }
 
   reconnect() {
+    if (this.isIntentionalDisconnect) {
+      return;
+    }
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('Max reconnection attempts reached');
+      // Could notify user here that real-time updates are unavailable
       return;
     }
 
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+    // Exponential backoff with jitter
+    const baseDelay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+    const jitter = Math.random() * 1000; // Add up to 1 second of random jitter
+    const delay = Math.min(baseDelay + jitter, 30000); // Cap at 30 seconds
 
-    console.log(`Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts})`);
+    console.log(`Reconnecting in ${Math.round(delay)}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
 
     setTimeout(() => {
-      this.connect();
+      if (!this.isIntentionalDisconnect) {
+        this.connect();
+      }
     }, delay);
   }
 
   sendTyping(telegramId) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: 'typing',
-        telegram_id: telegramId
-      }));
+      try {
+        this.ws.send(JSON.stringify({
+          type: 'typing',
+          telegram_id: telegramId
+        }));
+      } catch (e) {
+        console.error('Error sending typing indicator:', e);
+      }
+    }
+  }
+
+  send(data) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify(data));
+        return true;
+      } catch (e) {
+        console.error('Error sending data:', e);
+        return false;
+      }
+    } else {
+      console.warn('WebSocket not connected, cannot send message');
+      return false;
     }
   }
 
@@ -605,11 +679,20 @@ export class ChatWebSocket {
   }
 
   disconnect() {
+    this.isIntentionalDisconnect = true;
     this.cleanup();
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close(1000, 'Intentional disconnect');
+      } catch (e) {
+        console.error('Error closing WebSocket:', e);
+      }
       this.ws = null;
     }
+  }
+
+  isConnected() {
+    return this.ws && this.ws.readyState === WebSocket.OPEN;
   }
 }
 

@@ -38,9 +38,29 @@ const Chat = () => {
         fetchQuickReplies();
         fetchStats();
 
-        // Connect to WebSocket
-        wsRef.current = new ChatWebSocket(handleWebSocketMessage);
-        wsRef.current.connect();
+        // Connect to WebSocket with error handling
+        try {
+            wsRef.current = new ChatWebSocket(handleWebSocketMessage);
+            wsRef.current.connect();
+
+            // Fallback: If WebSocket fails, poll for updates
+            const fallbackInterval = setInterval(() => {
+                if (!wsRef.current?.isConnected()) {
+                    // Silently refresh conversations if WebSocket is down
+                    fetchConversations();
+                }
+            }, 10000); // Poll every 10 seconds as fallback
+
+            return () => {
+                clearInterval(fallbackInterval);
+                if (wsRef.current) {
+                    wsRef.current.disconnect();
+                }
+            };
+        } catch (error) {
+            console.error('Failed to initialize WebSocket:', error);
+            // Continue without WebSocket - the app will still work with polling
+        }
 
         return () => {
             if (wsRef.current) {
@@ -59,24 +79,104 @@ const Chat = () => {
     };
 
     const handleWebSocketMessage = useCallback((data) => {
+        console.log('WebSocket message received:', data); // Debug log
+
         if (data.type === 'new_message') {
-            // Add new message to current conversation if it matches
+            // Update the conversations list with the new message
+            setConversations(prev => {
+                const updatedConvs = [...prev];
+                const convIndex = updatedConvs.findIndex(
+                    c => c.telegram_id === data.message.telegram_id
+                );
+
+                if (convIndex >= 0) {
+                    // Update existing conversation
+                    updatedConvs[convIndex] = {
+                        ...updatedConvs[convIndex],
+                        last_message: data.message.message,
+                        last_message_time: data.message.timestamp,
+                        unread_count: data.message.direction === 'incoming'
+                            ? (updatedConvs[convIndex].unread_count || 0) + 1
+                            : updatedConvs[convIndex].unread_count
+                    };
+                    // Move to top (most recent)
+                    const [updated] = updatedConvs.splice(convIndex, 1);
+                    updatedConvs.unshift(updated);
+                } else {
+                    // New conversation
+                    updatedConvs.unshift({
+                        telegram_id: data.message.telegram_id,
+                        username: data.message.username,
+                        first_name: data.message.first_name,
+                        last_name: data.message.last_name,
+                        last_message: data.message.message,
+                        last_message_time: data.message.timestamp,
+                        unread_count: data.message.direction === 'incoming' ? 1 : 0,
+                        total_messages: 1
+                    });
+                }
+
+                return updatedConvs;
+            });
+
+            // If this conversation is currently selected, add the message to the messages list
             if (selectedConversation?.telegram_id === data.message.telegram_id) {
-                setMessages(prev => [...prev, data.message]);
+                setMessages(prev => {
+                    // Check if message already exists (by _id)
+                    const exists = prev.some(m => m._id === data.message._id);
+                    if (!exists) {
+                        return [...prev, data.message];
+                    }
+                    return prev;
+                });
+
+                // Mark as read if it's incoming and this conversation is selected
+                if (data.message.direction === 'incoming') {
+                    chatAPI.markAsRead(data.message.telegram_id).catch(console.error);
+                }
             }
 
-            // Update conversations list
-            fetchConversations();
-
-            // Show notification
+            // Show notification for incoming messages
             if (data.message.direction === 'incoming') {
-                showNotification(data.message);
+                // Browser notification
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification(`New message from @${data.message.username || 'User'}`, {
+                        body: data.message.message.substring(0, 100),
+                        icon: '/icon.png',
+                        tag: `msg-${data.message.telegram_id}` // Prevent duplicate notifications
+                    });
+                }
+
+                // Audio notification (optional)
+                try {
+                    const audio = new Audio('/notification.mp3'); // Add a notification sound file
+                    audio.volume = 0.5;
+                    audio.play().catch(() => {}); // Ignore if audio play fails
+                } catch (e) {
+                    // Ignore audio errors
+                }
             }
         } else if (data.type === 'messages_read') {
-            // Update read status
-            fetchConversations();
+            // Update read status in conversations
+            setConversations(prev =>
+                prev.map(conv =>
+                    conv.telegram_id === data.telegram_id
+                        ? { ...conv, unread_count: 0 }
+                        : conv
+                )
+            );
+        } else if (data.type === 'user_typing') {
+            // Handle typing indicator (optional)
+            console.log(`User ${data.telegram_id} is typing...`);
         }
-    }, [selectedConversation]);
+    }, []);
+
+    useEffect(() => {
+        // Request notification permission on component mount
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }, []);
 
     const showNotification = (message) => {
         if ('Notification' in window && Notification.permission === 'granted') {
@@ -136,14 +236,55 @@ const Chat = () => {
     const sendMessage = async () => {
         if (!messageInput.trim() || !selectedConversation) return;
 
-        setSending(true);
-        try {
-            await chatAPI.sendMessage(selectedConversation.telegram_id, messageInput);
-            setMessageInput('');
+        const tempMessage = {
+            _id: 'temp-' + Date.now(),
+            telegram_id: selectedConversation.telegram_id,
+            message: messageInput,
+            direction: 'outgoing',
+            timestamp: new Date().toISOString(),
+            read: true
+        };
 
-            // Message will be added via WebSocket
+        // Optimistically add message to UI
+        setMessages(prev => [...prev, tempMessage]);
+
+        // Update last message in conversations
+        setConversations(prev =>
+            prev.map(c =>
+                c.telegram_id === selectedConversation.telegram_id
+                    ? {
+                        ...c,
+                        last_message: messageInput,
+                        last_message_time: tempMessage.timestamp
+                    }
+                    : c
+            )
+        );
+
+        const messageText = messageInput;
+        setMessageInput('');
+        setSending(true);
+
+        try {
+            await chatAPI.sendMessage(selectedConversation.telegram_id, messageText);
+            console.log('✅ Message sent successfully');
         } catch (error) {
-            console.error('Error sending message:', error);
+            console.error('❌ Error sending message:', error);
+            // Remove optimistic message on error
+            setMessages(prev => prev.filter(m => m._id !== tempMessage._id));
+            // Restore conversation last message
+            setConversations(prev =>
+                prev.map(c =>
+                    c.telegram_id === selectedConversation.telegram_id
+                        ? {
+                            ...c,
+                            last_message: c.last_message,
+                            last_message_time: c.last_message_time
+                        }
+                        : c
+                )
+            );
+            setMessageInput(messageText); // Restore input
             alert('Failed to send message');
         } finally {
             setSending(false);

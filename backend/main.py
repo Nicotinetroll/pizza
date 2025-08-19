@@ -1416,6 +1416,7 @@ class ConnectionManager:
             await self.disconnect(admin_id)
 
 manager = ConnectionManager()
+__all__ = ['manager']
 
 # Chat Models
 class ChatMessageModel(BaseModel):
