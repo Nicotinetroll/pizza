@@ -1418,6 +1418,49 @@ class ConnectionManager:
 manager = ConnectionManager()
 __all__ = ['manager']
 
+new_message_event = asyncio.Event()
+new_message_telegram_id = None
+
+@app.post("/api/chat/notify-new-message")
+async def notify_new_message(data: dict):
+    """Endpoint for bot to notify about new messages"""
+    global new_message_telegram_id
+    
+    telegram_id = data.get('telegram_id')
+    if telegram_id:
+        new_message_telegram_id = telegram_id
+        new_message_event.set()
+        
+        # Also broadcast via WebSocket if available
+        await manager.broadcast({
+            "type": "refresh_required",
+            "telegram_id": telegram_id
+        })
+        
+        return {"status": "notified"}
+    return {"status": "error", "message": "No telegram_id provided"}
+
+@app.get("/api/chat/wait-for-messages")
+async def wait_for_messages(timeout: int = 30):
+    """Long polling endpoint - waits for new messages"""
+    try:
+        # Wait for up to 30 seconds for a new message
+        await asyncio.wait_for(new_message_event.wait(), timeout=timeout)
+        
+        # Clear the event for next time
+        new_message_event.clear()
+        
+        # Return the telegram_id that has new messages
+        return {
+            "new_message": True,
+            "telegram_id": new_message_telegram_id
+        }
+    except asyncio.TimeoutError:
+        # No new messages in timeout period
+        return {
+            "new_message": False
+        }
+
 # Chat Models
 class ChatMessageModel(BaseModel):
     telegram_id: int

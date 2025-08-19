@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from bson import ObjectId
 from datetime import datetime
 import logging
+import aiohttp
 
 from .config import MESSAGES
 from .database import (
@@ -28,11 +29,26 @@ logger = logging.getLogger(__name__)
 user_states = {}
 user_context = {}  # Store category context
 
-# IMPORTANT: Define save_chat_message at module level
-# In your handlers.py, update the save_chat_message function:
+# IMPORTANT: Direct notification to frontend
+async def notify_frontend_new_message(telegram_id: int):
+    """Send direct notification to frontend about new message"""
+    try:
+        # Create a simple HTTP request to trigger frontend refresh
+        async with aiohttp.ClientSession() as session:
+            # This endpoint will be added to main.py
+            async with session.post(
+                'http://localhost:8000/api/chat/notify-new-message',
+                json={'telegram_id': telegram_id}
+            ) as response:
+                if response.status == 200:
+                    logger.info(f"✅ Frontend notified about new message from {telegram_id}")
+                else:
+                    logger.warning(f"Failed to notify frontend: {response.status}")
+    except Exception as e:
+        logger.error(f"Error notifying frontend: {e}")
 
 async def save_chat_message(telegram_id: int, username: str, message: str, direction: str = "incoming", first_name: str = None, last_name: str = None):
-    """Save chat message to database and broadcast via WebSocket"""
+    """Save chat message to database and notify frontend"""
     try:
         from datetime import datetime
         
@@ -51,16 +67,17 @@ async def save_chat_message(telegram_id: int, username: str, message: str, direc
         message_doc["_id"] = str(result.inserted_id)
         logger.info(f"Saved {direction} message from {telegram_id}: {message[:50]}...")
         
-        # Broadcast to WebSocket - IMPORTANT: Always try to broadcast
+        # IMPORTANT: Notify frontend directly
+        if direction == "incoming":
+            await notify_frontend_new_message(telegram_id)
+        
+        # Still try WebSocket broadcast for backwards compatibility
         try:
-            # Try to import and use the manager
             import sys
             import os
-            # Add parent directory to path to import from main
             sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             from main import manager
             
-            # Format message for WebSocket
             broadcast_message = {
                 "type": "new_message",
                 "message": {
@@ -76,14 +93,11 @@ async def save_chat_message(telegram_id: int, username: str, message: str, direc
                 }
             }
             
-            # Broadcast to all connected admins
             await manager.broadcast(broadcast_message)
             logger.info(f"✅ Broadcasted {direction} message to WebSocket")
             
-        except ImportError as e:
-            logger.warning(f"Could not import manager: {e}")
         except Exception as ws_err:
-            logger.error(f"WebSocket broadcast error: {ws_err}")
+            logger.debug(f"WebSocket broadcast skipped: {ws_err}")
             
     except Exception as e:
         logger.error(f"Error saving chat message: {e}")
