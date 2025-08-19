@@ -523,24 +523,92 @@ export class ChatWebSocket {
     const token = localStorage.getItem('token');
     if (!token) return;
 
+    // Parse token to get email
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       const email = payload.email;
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.hostname;
 
-      let wsUrl;
-      if (process.env.NODE_ENV === 'development') {
-        wsUrl = `ws://localhost:8000/ws/chat/${encodeURIComponent(email)}`;
-      } else {
-        wsUrl = `${wsProtocol}//${wsHost}/ws/chat/${encodeURIComponent(email)}`;
-      }
+      // Use WSS in production, WS in development
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(email)}`;
 
-      console.log('Connecting to WebSocket:', wsUrl);
       this.ws = new WebSocket(wsUrl);
+
+      this.ws.onopen = () => {
+        console.log('Chat WebSocket connected');
+        this.reconnectAttempts = 0;
+
+        // Start ping interval to keep connection alive
+        this.pingInterval = setInterval(() => {
+          if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000); // Ping every 30 seconds
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type !== 'pong' && this.onMessage) {
+            this.onMessage(data);
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      this.ws.onclose = () => {
+        console.log('Chat WebSocket disconnected');
+        this.cleanup();
+        this.reconnect();
+      };
+
+      this.ws.onerror = (error) => {
+        console.error('Chat WebSocket error:', error);
+      };
 
     } catch (error) {
       console.error('Error connecting to chat WebSocket:', error);
+    }
+  }
+
+  reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('Max reconnection attempts reached');
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+
+    console.log(`Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts})`);
+
+    setTimeout(() => {
+      this.connect();
+    }, delay);
+  }
+
+  sendTyping(telegramId) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'typing',
+        telegram_id: telegramId
+      }));
+    }
+  }
+
+  cleanup() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+  }
+
+  disconnect() {
+    this.cleanup();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
     }
   }
 }
