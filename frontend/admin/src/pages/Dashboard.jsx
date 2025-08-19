@@ -180,29 +180,161 @@ const Dashboard = () => {
 
   const fetchData = async () => {
     try {
-      // For today/yesterday, we need hourly data
+      // Convert timeRange to appropriate API parameter
       let apiTimeRange = timeRange;
-      if (timeRange === 'today') {
-        apiTimeRange = 'today'; // Send 'today' to get hourly breakdown
-      } else if (timeRange === 'yesterday') {
-        apiTimeRange = 'yesterday'; // Send 'yesterday' to get hourly breakdown
+      if (timeRange === 'today') apiTimeRange = '1';
+      if (timeRange === 'yesterday') apiTimeRange = '1';
+
+      const [statsRes, ordersRes] = await Promise.all([
+        statsAPI.getDashboard(),
+        ordersAPI.getAll()
+      ]);
+      
+      // Try to get analytics, but don't fail if it doesn't work
+      let analyticsRes = null;
+      try {
+        analyticsRes = await statsAPI.getAnalytics(apiTimeRange);
+      } catch (analyticsError) {
+        console.log('Analytics API not available, using order data directly');
+        analyticsRes = null;
       }
 
-      const [statsRes, ordersRes, analyticsRes] = await Promise.all([
-        statsAPI.getDashboard(),
-        ordersAPI.getAll(),
-        statsAPI.getAnalytics(apiTimeRange)
-      ]);
-
-      setStats(statsRes.stats || {});
       setRecentOrders(ordersRes.orders?.slice(0, 5) || []);
       
-      // Process analytics data for today - need to aggregate orders by hour
-      if (timeRange === 'today' || timeRange === 'yesterday') {
-        const currentHour = timeRange === 'today' ? new Date().getHours() : 23;
+      // Filter orders based on selected time range
+      let filteredOrders = ordersRes.orders || [];
+      let previousPeriodOrders = [];
+      
+      const now = new Date();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (timeRange === 'today') {
+        // Filter orders from today
+        filteredOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= today;
+        }) || [];
+        
+        // Previous period = yesterday
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        previousPeriodOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= yesterday && orderDate < today;
+        }) || [];
+        
+      } else if (timeRange === 'yesterday') {
+        // Filter orders from yesterday
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        filteredOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= yesterday && orderDate < today;
+        }) || [];
+        
+        // Previous period = day before yesterday
+        const dayBefore = new Date(yesterday);
+        dayBefore.setDate(dayBefore.getDate() - 1);
+        previousPeriodOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= dayBefore && orderDate < yesterday;
+        }) || [];
+        
+      } else if (timeRange === '7') {
+        // Last 7 days
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        filteredOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= sevenDaysAgo;
+        }) || [];
+        
+        // Previous period = 7 days before that
+        const fourteenDaysAgo = new Date();
+        fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+        previousPeriodOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= fourteenDaysAgo && orderDate < sevenDaysAgo;
+        }) || [];
+        
+      } else if (timeRange === '30') {
+        // Last 30 days
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        filteredOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= thirtyDaysAgo;
+        }) || [];
+        
+        // Previous period = 30 days before that
+        const sixtyDaysAgo = new Date();
+        sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+        previousPeriodOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= sixtyDaysAgo && orderDate < thirtyDaysAgo;
+        }) || [];
+        
+      } else if (timeRange === '90') {
+        // Last 90 days
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        filteredOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= ninetyDaysAgo;
+        }) || [];
+        
+        // Previous period = 90 days before that
+        const oneEightyDaysAgo = new Date();
+        oneEightyDaysAgo.setDate(oneEightyDaysAgo.getDate() - 180);
+        previousPeriodOrders = ordersRes.orders?.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate >= oneEightyDaysAgo && orderDate < ninetyDaysAgo;
+        }) || [];
+      }
+      
+      // Calculate stats from filtered orders
+      const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
+      const uniqueUsers = new Set(filteredOrders.map(order => order.user_id || order.telegram_id)).size;
+      const avgOrderValue = filteredOrders.length > 0 ? totalRevenue / filteredOrders.length : 0;
+      
+      // Calculate previous period stats for growth percentages
+      const prevRevenue = previousPeriodOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
+      const prevOrders = previousPeriodOrders.length;
+      const prevUsers = new Set(previousPeriodOrders.map(order => order.user_id || order.telegram_id)).size;
+      const prevAvgOrder = previousPeriodOrders.length > 0 ? prevRevenue / previousPeriodOrders.length : 0;
+      
+      // Calculate growth percentages
+      const revenueGrowth = prevRevenue > 0 ? ((totalRevenue - prevRevenue) / prevRevenue) * 100 : 0;
+      const ordersGrowth = prevOrders > 0 ? ((filteredOrders.length - prevOrders) / prevOrders) * 100 : 0;
+      const usersGrowth = prevUsers > 0 ? ((uniqueUsers - prevUsers) / prevUsers) * 100 : 0;
+      const avgOrderGrowth = prevAvgOrder > 0 ? ((avgOrderValue - prevAvgOrder) / prevAvgOrder) * 100 : 0;
+      
+      // Set calculated stats
+      const calculatedStats = {
+        total_revenue_usdt: totalRevenue,
+        total_orders: filteredOrders.length,
+        total_users: uniqueUsers,
+        avg_order_value: avgOrderValue,
+        // Growth percentages
+        revenue_growth: revenueGrowth,
+        orders_growth: ordersGrowth,
+        users_growth: usersGrowth,
+        avg_order_growth: avgOrderGrowth,
+        // Keep other stats from API if available
+        top_products: statsRes.stats?.top_products || [],
+        total_products: statsRes.stats?.total_products || 0,
+        total_categories: statsRes.stats?.total_categories || 0
+      };
+      
+      setStats(calculatedStats);
+      
+      // Process analytics data for today - generate hourly data from 0:00 to current hour
+      if (timeRange === 'today') {
+        const currentHour = new Date().getHours();
         const todayData = [];
         
-        // Initialize all hours with 0
+        // Initialize all hours with zero data
         for (let hour = 0; hour <= currentHour; hour++) {
           todayData.push({
             _id: `${hour.toString().padStart(2, '0')}:00`,
@@ -211,41 +343,51 @@ const Dashboard = () => {
             orders: 0
           });
         }
-        
-        // If we have orders, aggregate them by hour
-        if (ordersRes.orders && ordersRes.orders.length > 0) {
+
+        // If we have orders, process them by hour
+        if (ordersRes?.orders && ordersRes.orders.length > 0) {
           const today = new Date();
-          const targetDate = timeRange === 'today' ? today : new Date(today.setDate(today.getDate() - 1));
+          today.setHours(0, 0, 0, 0);
           
+          // Filter today's orders and group by hour
           ordersRes.orders.forEach(order => {
             const orderDate = new Date(order.created_at);
             
-            // Check if order is from the target day
-            if (orderDate.toDateString() === targetDate.toDateString()) {
+            // Check if order is from today
+            if (orderDate >= today) {
               const orderHour = orderDate.getHours();
               
-              // Find the corresponding hour slot
-              const hourSlot = todayData.find(slot => slot._id === `${orderHour.toString().padStart(2, '0')}:00`);
-              if (hourSlot) {
-                hourSlot.revenue += order.total_usdt || 0;
-                hourSlot.profit += ((order.total_usdt || 0) * 0.4); // Estimate profit as 40% of revenue
-                hourSlot.orders += 1;
+              // Find the corresponding hour in our data array
+              if (orderHour <= currentHour) {
+                const hourData = todayData[orderHour];
+                if (hourData) {
+                  hourData.orders += 1;
+                  hourData.revenue += (order.total_usdt || 0);
+                  // Calculate profit (assuming 40% margin if not provided)
+                  const profit = order.profit_usdt || (order.total_usdt * 0.4);
+                  hourData.profit += profit;
+                }
               }
             }
           });
         }
-        
-        // If the backend provides hourly data, use it instead
-        if (analyticsRes?.hourly_data && Array.isArray(analyticsRes.hourly_data)) {
-          analyticsRes.hourly_data.forEach(hourData => {
-            const hourSlot = todayData.find(slot => {
-              const slotHour = parseInt(slot._id.split(':')[0]);
-              return slotHour === (hourData.hour || hourData._id?.hour);
-            });
-            if (hourSlot) {
-              hourSlot.revenue = hourData.revenue || hourSlot.revenue;
-              hourSlot.profit = hourData.profit || hourSlot.profit;
-              hourSlot.orders = hourData.orders || hourSlot.orders;
+
+        // Also check if analyticsRes has any data format we can use
+        if (analyticsRes?.daily_sales && Array.isArray(analyticsRes.daily_sales)) {
+          // If API returns properly formatted hourly data, use it
+          analyticsRes.daily_sales.forEach(item => {
+            // Extract hour from _id if it's in format "HH:00" or parse from date
+            let hour = -1;
+            if (typeof item._id === 'string' && item._id.includes(':')) {
+              hour = parseInt(item._id.split(':')[0]);
+            } else if (item.hour !== undefined) {
+              hour = item.hour;
+            }
+            
+            if (hour >= 0 && hour <= currentHour && todayData[hour]) {
+              todayData[hour].revenue = item.revenue || todayData[hour].revenue;
+              todayData[hour].profit = item.profit || todayData[hour].profit;
+              todayData[hour].orders = item.orders || todayData[hour].orders;
             }
           });
         }
@@ -255,16 +397,76 @@ const Dashboard = () => {
           daily_sales: todayData,
           category_sales: analyticsRes?.category_sales || []
         });
+        
+      } else if (timeRange === 'yesterday') {
+        // For yesterday, show all 24 hours
+        const yesterdayData = [];
+        
+        // Initialize all 24 hours
+        for (let hour = 0; hour < 24; hour++) {
+          yesterdayData.push({
+            _id: `${hour.toString().padStart(2, '0')}:00`,
+            revenue: 0,
+            profit: 0,
+            orders: 0
+          });
+        }
+
+        // Process yesterday's orders if available
+        if (ordersRes?.orders && ordersRes.orders.length > 0) {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          yesterday.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          ordersRes.orders.forEach(order => {
+            const orderDate = new Date(order.created_at);
+            
+            // Check if order is from yesterday
+            if (orderDate >= yesterday && orderDate < today) {
+              const orderHour = orderDate.getHours();
+              const hourData = yesterdayData[orderHour];
+              if (hourData) {
+                hourData.orders += 1;
+                hourData.revenue += (order.total_usdt || 0);
+                const profit = order.profit_usdt || (order.total_usdt * 0.4);
+                hourData.profit += profit;
+              }
+            }
+          });
+        }
+        
+        setAnalytics({
+          ...analyticsRes,
+          daily_sales: yesterdayData,
+          category_sales: analyticsRes?.category_sales || []
+        });
+        
       } else {
-        // For other time ranges, use daily data
+        // For other time ranges, use data as-is from API
         setAnalytics(analyticsRes || { daily_sales: [], category_sales: [], hourly_distribution: [] });
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
-      // Set empty data on error
+      // Set empty data on error but still show hourly structure for today
+      if (timeRange === 'today') {
+        const currentHour = new Date().getHours();
+        const emptyData = [];
+        for (let hour = 0; hour <= currentHour; hour++) {
+          emptyData.push({
+            _id: `${hour.toString().padStart(2, '0')}:00`,
+            revenue: 0,
+            profit: 0,
+            orders: 0
+          });
+        }
+        setAnalytics({ daily_sales: emptyData, category_sales: [], hourly_distribution: [] });
+      } else {
+        setAnalytics({ daily_sales: [], category_sales: [], hourly_distribution: [] });
+      }
       setStats({});
       setRecentOrders([]);
-      setAnalytics({ daily_sales: [], category_sales: [], hourly_distribution: [] });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -362,10 +564,10 @@ const Dashboard = () => {
 
   // Calculate growth percentages (you can replace with real calculations)
   const growthData = {
-    revenue: 12.5,
-    orders: 8.2,
-    users: -2.4,
-    avgOrder: 5.1
+    revenue: stats.revenue_growth || 0,
+    orders: stats.orders_growth || 0,
+    users: stats.users_growth || 0,
+    avgOrder: stats.avg_order_growth || 0
   };
 
   // Render chart based on active tab
