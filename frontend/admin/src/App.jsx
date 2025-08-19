@@ -21,6 +21,8 @@ import Categories from './pages/Categories';
 import Referrals from './pages/Referrals';
 import Sellers from './pages/Sellers';
 import Notifications from './pages/Notifications';
+import Chat from './pages/Chat';
+import { ChatBubbleIcon } from '@radix-ui/react-icons';
 
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, color: '#8b5cf6' },
@@ -30,6 +32,7 @@ const navigationItems = [
   { id: 'referrals', label: 'Referrals', icon: StarIcon, color: '#f59e0b' },
   { id: 'sellers', label: 'Sellers', icon: IdCardIcon, color: '#14b8a6' },
   { id: 'users', label: 'Users', icon: PersonIcon, color: '#6366f1' },
+  { id: 'chat', label: 'Chat', icon: ChatBubbleIcon, color: '#ec4899' },  // NEW
   { id: 'notifications', label: 'Notifications', icon: BellIcon, color: '#f59e0b' },
 ];
 
@@ -142,6 +145,7 @@ const MainApp = () => {
       referrals: Referrals,
       sellers: Sellers,
       users: Users,
+      chat: Chat,
       notifications: Notifications,
     };
 

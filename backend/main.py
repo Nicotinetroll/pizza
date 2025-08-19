@@ -14,6 +14,9 @@ import asyncio
 from dotenv import load_dotenv
 import logging
 from contextlib import asynccontextmanager
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import Dict, Set
+import json
 
 # Load environment variables
 load_dotenv('/opt/telegram-shop-bot/.env')
@@ -1378,6 +1381,431 @@ async def get_notification_settings(email: str = Depends(verify_token)):
     else:
         settings["_id"] = "main"
     return settings
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+    
+    async def connect(self, websocket: WebSocket, admin_id: str):
+        await websocket.accept()
+        self.active_connections[admin_id] = websocket
+        logger.info(f"Admin {admin_id} connected to chat")
+    
+    async def disconnect(self, admin_id: str):
+        if admin_id in self.active_connections:
+            del self.active_connections[admin_id]
+            logger.info(f"Admin {admin_id} disconnected from chat")
+    
+    async def send_message(self, message: dict, admin_id: str):
+        if admin_id in self.active_connections:
+            try:
+                await self.active_connections[admin_id].send_json(message)
+            except:
+                await self.disconnect(admin_id)
+    
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for admin_id, connection in self.active_connections.items():
+            try:
+                await connection.send_json(message)
+            except:
+                disconnected.append(admin_id)
+        
+        for admin_id in disconnected:
+            await self.disconnect(admin_id)
+
+manager = ConnectionManager()
+
+# Chat Models
+class ChatMessageModel(BaseModel):
+    telegram_id: int
+    message: str
+    attachments: Optional[List[str]] = None
+
+class ChatStatusModel(BaseModel):
+    telegram_id: int
+    status: str  # "read", "unread", "blocked"
+
+# CHAT ENDPOINTS
+
+@app.websocket("/ws/chat/{admin_email}")
+async def websocket_endpoint(websocket: WebSocket, admin_email: str):
+    """WebSocket for real-time chat"""
+    await manager.connect(websocket, admin_email)
+    try:
+        while True:
+            # Keep connection alive and handle incoming messages
+            data = await websocket.receive_json()
+            
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif data.get("type") == "typing":
+                # Handle typing indicator
+                pass
+                
+    except WebSocketDisconnect:
+        await manager.disconnect(admin_email)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        await manager.disconnect(admin_email)
+
+@app.get("/api/chat/conversations")
+async def get_conversations(
+    skip: int = 0,
+    limit: int = 50,
+    unread_only: bool = False,
+    email: str = Depends(verify_token)
+):
+    """Get list of all conversations with users"""
+    
+    # Build aggregation pipeline for conversations
+    pipeline = [
+        # Group messages by telegram_id
+        {
+            "$group": {
+                "_id": "$telegram_id",
+                "last_message": {"$last": "$message"},
+                "last_message_time": {"$max": "$timestamp"},
+                "unread_count": {
+                    "$sum": {
+                        "$cond": [
+                            {"$and": [
+                                {"$eq": ["$direction", "incoming"]},
+                                {"$eq": ["$read", False]}
+                            ]},
+                            1,
+                            0
+                        ]
+                    }
+                },
+                "total_messages": {"$sum": 1}
+            }
+        },
+        {"$sort": {"last_message_time": -1}},
+    ]
+    
+    if unread_only:
+        pipeline.append({"$match": {"unread_count": {"$gt": 0}}})
+    
+    pipeline.extend([
+        {"$skip": skip},
+        {"$limit": limit}
+    ])
+    
+    conversations = await db.chat_messages.aggregate(pipeline).to_list(limit)
+    
+    # Enrich with user data
+    for conv in conversations:
+        user = await db.users.find_one({"telegram_id": conv["_id"]})
+        if user:
+            conv["username"] = user.get("username", f"User{conv['_id']}")
+            conv["first_name"] = user.get("first_name", "")
+            conv["last_name"] = user.get("last_name", "")
+            conv["total_orders"] = user.get("total_orders", 0)
+            conv["total_spent"] = user.get("total_spent_usdt", 0)
+            conv["status"] = user.get("status", "active")
+        else:
+            conv["username"] = f"User{conv['_id']}"
+            conv["first_name"] = ""
+            conv["last_name"] = ""
+            conv["total_orders"] = 0
+            conv["total_spent"] = 0
+            conv["status"] = "unknown"
+        
+        conv["telegram_id"] = conv.pop("_id")
+    
+    # Get total count
+    total = await db.chat_messages.distinct("telegram_id")
+    
+    return {
+        "conversations": conversations,
+        "total": len(total),
+        "unread_total": sum(c.get("unread_count", 0) for c in conversations)
+    }
+
+@app.get("/api/chat/messages/{telegram_id}")
+async def get_messages(
+    telegram_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    email: str = Depends(verify_token)
+):
+    """Get messages for specific user"""
+    
+    messages = await db.chat_messages.find(
+        {"telegram_id": telegram_id}
+    ).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Convert ObjectId to string and format messages
+    for msg in messages:
+        msg["_id"] = str(msg["_id"])
+        msg["timestamp"] = msg.get("timestamp", datetime.now(timezone.utc))
+    
+    # Mark incoming messages as read
+    await db.chat_messages.update_many(
+        {
+            "telegram_id": telegram_id,
+            "direction": "incoming",
+            "read": False
+        },
+        {"$set": {"read": True}}
+    )
+    
+    # Get user info
+    user = await db.users.find_one({"telegram_id": telegram_id})
+    user_info = {
+        "telegram_id": telegram_id,
+        "username": user.get("username", f"User{telegram_id}") if user else f"User{telegram_id}",
+        "first_name": user.get("first_name", "") if user else "",
+        "last_name": user.get("last_name", "") if user else "",
+        "created_at": user.get("created_at") if user else None,
+        "total_orders": user.get("total_orders", 0) if user else 0,
+        "total_spent": user.get("total_spent_usdt", 0) if user else 0,
+        "is_vip": user.get("is_vip", False) if user else False,
+        "status": user.get("status", "unknown") if user else "unknown"
+    }
+    
+    # Broadcast read status to all admins
+    await manager.broadcast({
+        "type": "messages_read",
+        "telegram_id": telegram_id
+    })
+    
+    return {
+        "messages": list(reversed(messages)),  # Return in chronological order
+        "user": user_info,
+        "total": await db.chat_messages.count_documents({"telegram_id": telegram_id})
+    }
+
+@app.post("/api/chat/send")
+async def send_message(
+    message_data: ChatMessageModel,
+    email: str = Depends(verify_token)
+):
+    """Send message to user via Telegram bot"""
+    
+    try:
+        # Import bot instance (needs to be accessible)
+        from bot_modules.public_notifications import public_notifier
+        bot = public_notifier.bot
+        
+        # Send message via Telegram
+        sent_message = await bot.send_message(
+            chat_id=message_data.telegram_id,
+            text=message_data.message,
+            parse_mode='Markdown'
+        )
+        
+        # Save to database
+        message_doc = {
+            "telegram_id": message_data.telegram_id,
+            "message": message_data.message,
+            "direction": "outgoing",
+            "admin_email": email,
+            "timestamp": datetime.now(timezone.utc),
+            "read": True,
+            "telegram_message_id": sent_message.message_id,
+            "attachments": message_data.attachments
+        }
+        
+        result = await db.chat_messages.insert_one(message_doc)
+        message_doc["_id"] = str(result.inserted_id)
+        
+        # Broadcast to all connected admins
+        await manager.broadcast({
+            "type": "new_message",
+            "message": message_doc
+        })
+        
+        return {
+            "success": True,
+            "message": "Message sent",
+            "message_id": str(result.inserted_id)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to send message: {str(e)}")
+
+@app.patch("/api/chat/mark-read/{telegram_id}")
+async def mark_messages_read(
+    telegram_id: int,
+    email: str = Depends(verify_token)
+):
+    """Mark all messages from user as read"""
+    
+    result = await db.chat_messages.update_many(
+        {
+            "telegram_id": telegram_id,
+            "direction": "incoming",
+            "read": False
+        },
+        {"$set": {"read": True, "read_by": email, "read_at": datetime.now(timezone.utc)}}
+    )
+    
+    # Broadcast to all admins
+    await manager.broadcast({
+        "type": "messages_read",
+        "telegram_id": telegram_id,
+        "read_by": email
+    })
+    
+    return {
+        "success": True,
+        "messages_marked": result.modified_count
+    }
+
+@app.delete("/api/chat/conversation/{telegram_id}")
+async def delete_conversation(
+    telegram_id: int,
+    email: str = Depends(verify_token)
+):
+    """Delete entire conversation with user"""
+    
+    if email != ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Only main admin can delete conversations")
+    
+    result = await db.chat_messages.delete_many({"telegram_id": telegram_id})
+    
+    # Log action
+    await db.audit_logs.insert_one({
+        "admin_id": email,
+        "action": "DELETE_CONVERSATION",
+        "telegram_id": telegram_id,
+        "messages_deleted": result.deleted_count,
+        "timestamp": datetime.now(timezone.utc)
+    })
+    
+    return {
+        "success": True,
+        "messages_deleted": result.deleted_count
+    }
+
+@app.get("/api/chat/search")
+async def search_messages(
+    query: str,
+    telegram_id: Optional[int] = None,
+    email: str = Depends(verify_token)
+):
+    """Search in messages"""
+    
+    search_filter = {
+        "$text": {"$search": query}
+    }
+    
+    if telegram_id:
+        search_filter["telegram_id"] = telegram_id
+    
+    messages = await db.chat_messages.find(
+        search_filter,
+        {"score": {"$meta": "textScore"}}
+    ).sort([("score", {"$meta": "textScore"})]).limit(50).to_list(50)
+    
+    for msg in messages:
+        msg["_id"] = str(msg["_id"])
+        # Get user info
+        user = await db.users.find_one({"telegram_id": msg["telegram_id"]})
+        msg["username"] = user.get("username", f"User{msg['telegram_id']}") if user else f"User{msg['telegram_id']}"
+    
+    return {
+        "results": messages,
+        "total": len(messages)
+    }
+
+@app.get("/api/chat/stats")
+async def get_chat_stats(email: str = Depends(verify_token)):
+    """Get chat statistics"""
+    
+    total_conversations = len(await db.chat_messages.distinct("telegram_id"))
+    
+    total_messages = await db.chat_messages.count_documents({})
+    
+    unread_messages = await db.chat_messages.count_documents({
+        "direction": "incoming",
+        "read": False
+    })
+    
+    # Messages today
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_messages = await db.chat_messages.count_documents({
+        "timestamp": {"$gte": today_start}
+    })
+    
+    # Average response time (if tracking)
+    avg_response_time = "N/A"  # Implement if needed
+    
+    # Most active users
+    pipeline = [
+        {
+            "$group": {
+                "_id": "$telegram_id",
+                "message_count": {"$sum": 1}
+            }
+        },
+        {"$sort": {"message_count": -1}},
+        {"$limit": 5}
+    ]
+    
+    top_users = await db.chat_messages.aggregate(pipeline).to_list(5)
+    
+    for user in top_users:
+        user_data = await db.users.find_one({"telegram_id": user["_id"]})
+        user["username"] = user_data.get("username", f"User{user['_id']}") if user_data else f"User{user['_id']}"
+        user["telegram_id"] = user.pop("_id")
+    
+    return {
+        "total_conversations": total_conversations,
+        "total_messages": total_messages,
+        "unread_messages": unread_messages,
+        "today_messages": today_messages,
+        "avg_response_time": avg_response_time,
+        "top_users": top_users
+    }
+
+# Quick replies templates
+@app.get("/api/chat/quick-replies")
+async def get_quick_replies(email: str = Depends(verify_token)):
+    """Get quick reply templates"""
+    
+    replies = await db.quick_replies.find({}).to_list(100)
+    
+    for reply in replies:
+        reply["_id"] = str(reply["_id"])
+    
+    # If no replies exist, create defaults
+    if not replies:
+        default_replies = [
+            {"title": "Order Status", "message": "Your order is being processed and will be shipped within 24 hours."},
+            {"title": "Payment Confirmed", "message": "We've received your payment! Your order is now confirmed."},
+            {"title": "Tracking Info", "message": "Your tracking number will be provided once the order ships."},
+            {"title": "Thank You", "message": "Thank you for your order! 🚀"},
+            {"title": "Need Help?", "message": "Is there anything else I can help you with?"},
+            {"title": "Welcome", "message": "Welcome to AnabolicPizza! How can I help you today?"},
+        ]
+        
+        for reply in default_replies:
+            await db.quick_replies.insert_one(reply)
+        
+        replies = await db.quick_replies.find({}).to_list(100)
+        for reply in replies:
+            reply["_id"] = str(reply["_id"])
+    
+    return {"replies": replies}
+
+# Create index for message search
+async def setup_chat_indexes():
+    """Setup MongoDB indexes for chat (call this once)"""
+    await db.chat_messages.create_index([("message", "text")])
+    await db.chat_messages.create_index([("telegram_id", 1), ("timestamp", -1)])
+    await db.chat_messages.create_index([("read", 1), ("direction", 1)])
+    logger.info("Chat indexes created")
+
+# Call this on startup
+@app.on_event("startup")
+async def startup_event_extended():
+    await setup_chat_indexes()
+    logger.info("Chat system initialized")
 
 @app.put("/api/notifications/settings")
 async def update_notification_settings(

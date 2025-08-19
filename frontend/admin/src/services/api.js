@@ -425,4 +425,192 @@ export const dashboardAPI = {
   getAnalytics: statsAPI.getAnalytics
 };
 
+// Add this to frontend/admin/src/services/api.js
+
+export const chatAPI = {
+  // Get all conversations
+  getConversations: async (unreadOnly = false) => {
+    const response = await api.get('/chat/conversations', {
+      params: { unread_only: unreadOnly }
+    });
+    return response.data;
+  },
+
+  // Get messages for specific user
+  getMessages: async (telegramId, skip = 0, limit = 50) => {
+    if (!telegramId) {
+      throw new Error('Telegram ID required');
+    }
+    const response = await api.get(`/chat/messages/${telegramId}`, {
+      params: { skip, limit }
+    });
+    return response.data;
+  },
+
+  // Send message to user
+  sendMessage: async (telegramId, message, attachments = null) => {
+    if (!telegramId || !message) {
+      throw new Error('Telegram ID and message required');
+    }
+
+    const response = await api.post('/chat/send', {
+      telegram_id: telegramId,
+      message: sanitizeInput(message),
+      attachments
+    });
+    return response.data;
+  },
+
+  // Mark messages as read
+  markAsRead: async (telegramId) => {
+    if (!telegramId) {
+      throw new Error('Telegram ID required');
+    }
+    const response = await api.patch(`/chat/mark-read/${telegramId}`);
+    return response.data;
+  },
+
+  // Delete conversation
+  deleteConversation: async (telegramId) => {
+    if (!telegramId) {
+      throw new Error('Telegram ID required');
+    }
+    if (!confirm('Are you sure you want to delete this entire conversation?')) {
+      return;
+    }
+    const response = await api.delete(`/chat/conversation/${telegramId}`);
+    return response.data;
+  },
+
+  // Search messages
+  searchMessages: async (query, telegramId = null) => {
+    if (!query) {
+      throw new Error('Search query required');
+    }
+    const params = { query };
+    if (telegramId) {
+      params.telegram_id = telegramId;
+    }
+    const response = await api.get('/chat/search', { params });
+    return response.data;
+  },
+
+  // Get chat statistics
+  getStats: async () => {
+    const response = await api.get('/chat/stats');
+    return response.data;
+  },
+
+  // Get quick replies
+  getQuickReplies: async () => {
+    const response = await api.get('/chat/quick-replies');
+    return response.data;
+  }
+};
+
+// WebSocket connection for real-time chat
+export class ChatWebSocket {
+  constructor(onMessage) {
+    this.ws = null;
+    this.onMessage = onMessage;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000;
+    this.pingInterval = null;
+  }
+
+  connect() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    // Parse token to get email
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const email = payload.email;
+
+      // Use WSS in production, WS in development
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(email)}`;
+
+      this.ws = new WebSocket(wsUrl);
+
+      this.ws.onopen = () => {
+        console.log('Chat WebSocket connected');
+        this.reconnectAttempts = 0;
+
+        // Start ping interval to keep connection alive
+        this.pingInterval = setInterval(() => {
+          if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000); // Ping every 30 seconds
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type !== 'pong' && this.onMessage) {
+            this.onMessage(data);
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      this.ws.onclose = () => {
+        console.log('Chat WebSocket disconnected');
+        this.cleanup();
+        this.reconnect();
+      };
+
+      this.ws.onerror = (error) => {
+        console.error('Chat WebSocket error:', error);
+      };
+
+    } catch (error) {
+      console.error('Error connecting to chat WebSocket:', error);
+    }
+  }
+
+  reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('Max reconnection attempts reached');
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+
+    console.log(`Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts})`);
+
+    setTimeout(() => {
+      this.connect();
+    }, delay);
+  }
+
+  sendTyping(telegramId) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'typing',
+        telegram_id: telegramId
+      }));
+    }
+  }
+
+  cleanup() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+  }
+
+  disconnect() {
+    this.cleanup();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+}
+
 export default api;
