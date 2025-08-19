@@ -32,7 +32,7 @@ const navigationItems = [
   { id: 'referrals', label: 'Referrals', icon: StarIcon, color: '#f59e0b' },
   { id: 'sellers', label: 'Sellers', icon: IdCardIcon, color: '#14b8a6' },
   { id: 'users', label: 'Users', icon: PersonIcon, color: '#6366f1' },
-  { id: 'chat', label: 'Chat', icon: ChatBubbleIcon, color: '#ec4899' },  // NEW
+  { id: 'chat', label: 'Chat', icon: ChatBubbleIcon, color: '#ec4899' },
   { id: 'notifications', label: 'Notifications', icon: BellIcon, color: '#f59e0b' },
 ];
 
@@ -125,7 +125,85 @@ const SecurityStatus = () => {
 const MainApp = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const { isAuthenticated, logout, user } = useAuth();
+
+  // Fetch unread messages count
+  const fetchUnreadCount = async () => {
+    try {
+      const response = await fetch('/api/chat/conversations?unread_only=true', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const totalUnread = data.conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
+        setUnreadMessages(totalUnread);
+      }
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
+    }
+  };
+
+  // Fetch unread count on mount and periodically
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    fetchUnreadCount();
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+    
+    // Also check with long polling for instant updates
+    let mounted = true;
+    
+    const checkForNewMessages = async () => {
+      while (mounted && isAuthenticated) {
+        try {
+          const response = await fetch('/api/chat/wait-for-messages?timeout=30', {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.new_message) {
+              fetchUnreadCount();
+              
+              // Play notification sound if not on chat tab
+              if (activeTab !== 'chat') {
+                try {
+                  const audio = new Audio('/notification.mp3');
+                  audio.volume = 0.3;
+                  audio.play().catch(() => {});
+                } catch (e) {}
+              }
+            }
+          }
+        } catch (error) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      }
+    };
+    
+    checkForNewMessages();
+    
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [isAuthenticated, activeTab]);
+
+  // Reset unread when chat tab is active
+  useEffect(() => {
+    if (activeTab === 'chat' && unreadMessages > 0) {
+      // Clear unread badge when chat is opened
+      setTimeout(() => setUnreadMessages(0), 1000);
+    }
+  }, [activeTab, unreadMessages]);
 
   useEffect(() => {
     // Close mobile menu when tab changes
@@ -217,7 +295,7 @@ const MainApp = () => {
                 </motion.div>
                 <Box>
                   <Text size="4" weight="bold" style={{ display: 'block' }}>
-                    Quatroformaggi
+                    AnabolicPizza
                   </Text>
                   <Flex align="center" gap="1">
                     <Box style={{
@@ -242,6 +320,8 @@ const MainApp = () => {
                   {navigationItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = activeTab === item.id;
+                    const isChat = item.id === 'chat';
+                    const hasUnread = isChat && unreadMessages > 0;
 
                     return (
                         <Box
@@ -262,8 +342,14 @@ const MainApp = () => {
                                   justifyContent: 'flex-start',
                                   background: isActive
                                       ? `linear-gradient(135deg, ${item.color}20 0%, ${item.color}10 100%)`
-                                      : 'transparent',
-                                  border: isActive ? `1px solid ${item.color}40` : '1px solid transparent',
+                                      : hasUnread 
+                                        ? 'rgba(236, 72, 153, 0.1)'
+                                        : 'transparent',
+                                  border: isActive 
+                                      ? `1px solid ${item.color}40` 
+                                      : hasUnread
+                                        ? '1px solid rgba(236, 72, 153, 0.3)'
+                                        : '1px solid transparent',
                                   color: isActive ? item.color : 'rgba(255, 255, 255, 0.7)',
                                   position: 'relative',
                                   overflow: 'hidden',
@@ -295,10 +381,51 @@ const MainApp = () => {
                                   />
                               )}
                               <Flex align="center" gap="3" style={{ width: '100%' }}>
-                                <Icon width="18" height="18" style={{ flexShrink: 0 }} />
-                                <Text size="2" weight={isActive ? 'medium' : 'regular'}>
-                                  {item.label}
-                                </Text>
+                                <Box style={{ position: 'relative' }}>
+                                  <Icon width="18" height="18" style={{ flexShrink: 0 }} />
+                                  {hasUnread && (
+                                    <motion.div
+                                      initial={{ scale: 0 }}
+                                      animate={{ scale: 1 }}
+                                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                      style={{
+                                        position: 'absolute',
+                                        top: '-4px',
+                                        right: '-4px',
+                                        width: '8px',
+                                        height: '8px',
+                                        background: '#ef4444',
+                                        borderRadius: '50%',
+                                        boxShadow: '0 0 10px rgba(239, 68, 68, 0.5)'
+                                      }}
+                                    />
+                                  )}
+                                </Box>
+                                <Flex align="center" justify="between" style={{ flex: 1 }}>
+                                  <Text size="2" weight={isActive ? 'medium' : 'regular'}>
+                                    {item.label}
+                                  </Text>
+                                  {hasUnread && (
+                                    <motion.div
+                                      initial={{ scale: 0 }}
+                                      animate={{ scale: 1 }}
+                                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                    >
+                                      <Badge 
+                                        size="2" 
+                                        color="red"
+                                        style={{
+                                          background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                                          color: '#fff',
+                                          fontWeight: 'bold',
+                                          animation: 'pulse 2s infinite'
+                                        }}
+                                      >
+                                        {unreadMessages > 99 ? '99+' : unreadMessages}
+                                      </Badge>
+                                    </motion.div>
+                                  )}
+                                </Flex>
                               </Flex>
                             </Button>
                           </motion.div>
@@ -389,6 +516,11 @@ const MainApp = () => {
                     <Text size="5" weight="bold">
                       {navigationItems.find(item => item.id === activeTab)?.label}
                     </Text>
+                    {activeTab === 'chat' && unreadMessages > 0 && (
+                      <Badge size="2" color="red">
+                        {unreadMessages} new
+                      </Badge>
+                    )}
                     {/* Static icon - NO ROTATION */}
                     <Box style={{ opacity: 0.6 }}>
                       {React.createElement(
@@ -470,6 +602,8 @@ const MainApp = () => {
                           {navigationItems.map((item) => {
                             const Icon = item.icon;
                             const isActive = activeTab === item.id;
+                            const isChat = item.id === 'chat';
+                            const hasUnread = isChat && unreadMessages > 0;
 
                             return (
                                 <Button
@@ -489,9 +623,16 @@ const MainApp = () => {
                                       paddingBottom: '12px'
                                     }}
                                 >
-                                  <Flex align="center" gap="3">
-                                    <Icon width="16" height="16" />
-                                    <Text size="2">{item.label}</Text>
+                                  <Flex align="center" gap="3" justify="between" style={{ width: '100%' }}>
+                                    <Flex align="center" gap="3">
+                                      <Icon width="16" height="16" />
+                                      <Text size="2">{item.label}</Text>
+                                    </Flex>
+                                    {hasUnread && (
+                                      <Badge size="1" color="red">
+                                        {unreadMessages}
+                                      </Badge>
+                                    )}
                                   </Flex>
                                 </Button>
                             );
