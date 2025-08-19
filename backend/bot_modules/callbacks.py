@@ -290,7 +290,7 @@ async def handle_skip_referral(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_data: str):
-    """Process payment selection with notifications"""
+    """Process payment selection WITHOUT sending notification yet"""
     query = update.callback_query
     payment_method = payment_data.replace("pay_", "").upper()
     
@@ -339,8 +339,8 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     
     order_id = await create_order(order_data)
     
-    # Send public notification (async in background)
-    asyncio.create_task(public_notifier.send_notification(order_data))
+    # DON'T SEND NOTIFICATION HERE - REMOVED!
+    # asyncio.create_task(public_notifier.send_notification(order_data))
     
     # Apply referral code usage
     if referral_code:
@@ -370,7 +370,7 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_fake_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle simulated payment for demo with notification"""
+    """Handle simulated payment for demo with notification ONLY after confirmation"""
     query = update.callback_query
     order_id = data.replace("fake_pay_", "")
     
@@ -390,7 +390,7 @@ async def handle_fake_payment(update: Update, context: ContextTypes.DEFAULT_TYPE
     if success:
         order = await get_order_by_id(order_id)
         
-        # Send payment confirmed notification
+        # ONLY NOW send payment confirmed notification
         asyncio.create_task(public_notifier.send_notification(order))
         
         success_text = MESSAGES["payment_confirmed"].format(

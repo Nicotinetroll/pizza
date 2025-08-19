@@ -34,8 +34,8 @@ class PublicNotificationManager:
             "Ireland": "🇮🇪", "Luxembourg": "🇱🇺"
         }
     
-    async def get_notification_settings(self) -> Dict:
-        """Get notification settings from database"""
+    async def get_settings(self):
+        """Get notification settings from database - FIXED METHOD NAME"""
         settings = await self.db.notification_settings.find_one({"_id": "main"})
         if not settings:
             return {
@@ -51,6 +51,11 @@ class PublicNotificationManager:
                 "message_templates": []
             }
         return settings
+    
+    # ALIAS for compatibility
+    async def get_notification_settings(self):
+        """Alias for get_settings for compatibility"""
+        return await self.get_settings()
     
     async def get_realistic_order_amount(self, min_amount: float = 100, max_amount: float = 3000) -> float:
         """Generate 100% realistic order amounts - NO ROUNDING!"""
@@ -75,7 +80,6 @@ class PublicNotificationManager:
             possible_amounts = []
             
             # Strategy 1: Single product, multiple quantities (most common)
-            # Try to fill the ENTIRE range with realistic quantities
             for price in prices:
                 # Calculate max quantity for this product
                 max_qty = int(max_amount / price) if price > 0 else 1
@@ -87,7 +91,6 @@ class PublicNotificationManager:
                         possible_amounts.append(total)
             
             # Strategy 2: Bundles (2-4 different products)
-            # Generate MANY combinations to cover entire range
             for _ in range(100):  # Generate 100 different bundles
                 num_products = random.randint(2, min(4, len(prices)))
                 selected_prices = random.sample(prices, num_products)
@@ -100,7 +103,6 @@ class PublicNotificationManager:
                     possible_amounts.append(total)
             
             # Strategy 3: Fill gaps with calculated combinations
-            # If we need amounts near max_amount, calculate them
             if max_amount > 2000:
                 # Try to create amounts close to max
                 target_ranges = [
@@ -143,7 +145,6 @@ class PublicNotificationManager:
                     return price * qty
             
             # EQUAL distribution across entire range!
-            # Don't prefer small amounts
             return random.choice(possible_amounts)
             
         except Exception as e:
@@ -175,94 +176,95 @@ class PublicNotificationManager:
         else:
             return "$3000+"
     
-    async def get_random_template(self, amount: float) -> str:
-        """Get random message template from database"""
-        settings = await self.get_notification_settings()
-        templates = settings.get("message_templates", [])
-        
-        if not templates:
-            # Default templates - epic messages
-            templates = [
-                {"text": "🔥 *BOOM!* {flag} {country} just dropped {amount} on gains\n\n_Another warrior joins the anabolic army_ 💪\n\nThis is the way."},
-                {"text": "💉 *{country} KNOWS WHAT'S UP*\n\n{amount} worth of pure anabolic excellence heading to {flag}\n\n_While you're reading this, they're already growing_ 🚀"},
-                {"text": "⚡ *INJECTION DETECTED*\n\n{flag} {country} injected {amount} into their gains portfolio\n\n_Tren hard, eat clen, anavar give up!_ 💯"},
-                {"text": "🎯 *{country} MAKING MOVES*\n\nJust secured {amount} in premium gear {flag}\n\n_Someone's about to look absolutely diced_ 🔥\n\nRespect the dedication!"},
-                {"text": "💀 *BEAST MODE: {country}*\n\n{amount} invested in getting absolutely yoked {flag}\n\n_Leaving humanity behind, one order at a time_ 👹"},
-                {"text": "🚀 *{flag} {country} BLAST OFF*\n\nDropped {amount} like it's leg day\n\n_While natties debate, this legend elevates_ 💪\n\n#GainsOverEverything"},
-                {"text": "⚡ *SOMEONE IN {country} CHOSE VIOLENCE*\n\n{amount} worth of anabolic warfare {flag}\n\n_Muscles: confused\nGains: imminent\nNatty card: revoked_ 😈"},
-                {"text": "🏆 *{country} ENTERS THE CHAT*\n\n{flag} Just copped {amount} in elite supplements\n\n_Dysmorphia says \"not big enough\"\nWallet says \"yes daddy\"_ 💸"},
-                {"text": "🔥 *ANABOLIC ALERT FROM {country}*\n\n{amount} order confirmed {flag}\n\n_Somewhere a gym mirror just cracked from future gains_ 💥\n\nThis is peak performance."},
-                {"text": "💊 *{flag} {country} PRESCRIPTION: GAINS*\n\nDosage: {amount} of pure excellence\n\n_Side effects may include:\n• Looking absolutely peeled\n• Shirt splitting syndrome\n• Excessive confidence_ 💯"}
-            ]
-        
-        # For big orders, add more impressive templates
-        if amount >= 1500:
-            big_templates = [
-                {"text": "🐋 *WHALE ALERT FROM {country}!*\n\n{flag} Just dropped {amount} like a boss\n\n_This isn't just an order, it's a statement._\n\n*RESPECT THE COMMITMENT* 👑"},
-                {"text": "💎 *{country} GOING ALL IN*\n\n{amount} investment in absolute dominance {flag}\n\n_Someone just bought the entire gym's respect_ 💯\n\nBuilt different."},
-                {"text": "🔱 *LEGENDARY ORDER FROM {country}*\n\n{flag} {amount} worth of pure excellence\n\n_The kind of commitment that separates champions from everyone else_ 🏆"}
-            ]
-            templates.extend(big_templates)
-        
-        return random.choice(templates).get("text", "New order placed!")
-    
-    async def send_notification(self, order_data: Dict) -> bool:
-        """Send public notification about order"""
+    async def format_order_message(self, order_data: dict, settings: dict) -> str:
+        """Format the order message for public notification"""
         try:
-            settings = await self.get_notification_settings()
-            
-            if not settings["enabled"]:
-                logger.info("Notifications disabled")
-                return False
-            
-            channel_id = settings.get("channel_id")
-            if not channel_id:
-                logger.info("No channel ID set in notification settings")
-                return False
-            
-            # Prepare data
             country = order_data.get('delivery_country', 'EU')
-            amount = order_data.get('total_usdt', 0)
             flag = self.country_flags.get(country, "🇪🇺")
-            amount_display = await self.get_amount_display(amount, settings["show_exact_amount"])
+            amount = float(order_data.get('total_usdt', 0))
             
-            # Get template and format
-            template = await self.get_random_template(amount)
-            message = template.format(
-                amount=amount_display,
-                flag=flag,
-                country=country
+            # Get amount display
+            amount_display = await self.get_amount_display(
+                amount, 
+                settings.get('show_exact_amount', False)
             )
             
-            # Add delay if configured
-            if settings.get("delay_min", 0) > 0:
-                delay = random.randint(
-                    settings.get("delay_min", 60),
-                    settings.get("delay_max", 300)
-                )
-                logger.info(f"Waiting {delay} seconds before sending notification")
-                await asyncio.sleep(delay)
+            # Get template
+            templates = settings.get("message_templates", [])
+            
+            if not templates:
+                # Default templates - epic messages
+                templates = [
+                    {"text": "🔥 *BOOM!* {flag} {country} just dropped {amount} on gains\n\n_Another warrior joins the anabolic army_ 💪"},
+                    {"text": "💉 *{country} KNOWS WHAT'S UP*\n\n{amount} worth of pure excellence heading to {flag}"},
+                    {"text": "⚡ *INJECTION DETECTED*\n\n{flag} {country} injected {amount} into their gains portfolio"},
+                    {"text": "🎯 *{country} MAKING MOVES*\n\nJust secured {amount} in premium gear {flag}"},
+                    {"text": "💀 *BEAST MODE: {country}*\n\n{amount} invested in getting absolutely yoked {flag}"},
+                ]
+            
+            # Choose random template
+            template = random.choice(templates)
+            message = template.get("text", "New order from {country}! Amount: {amount}")
+            
+            # Replace placeholders
+            message = message.replace("{country}", country)
+            message = message.replace("{flag}", flag)
+            message = message.replace("{amount}", amount_display)
+            
+            return message
+            
+        except Exception as e:
+            logger.error(f"Error formatting message: {e}")
+            return f"🔥 New order received! 🚀"
+    
+    async def send_notification(self, order_data: dict) -> bool:
+        """Send notification to public channel ONLY for confirmed orders"""
+        try:
+            settings = await self.get_settings()
+            if not settings.get('enabled') or not settings.get('channel_id'):
+                logger.info("Notifications disabled or no channel configured")
+                return False
+            
+            # IMPORTANT: Only send notification for PAID/COMPLETED orders
+            order_status = order_data.get('status', 'pending')
+            if order_status not in ['paid', 'completed']:
+                logger.info(f"Skipping notification for {order_status} order")
+                return False
+            
+            # Generate random delay
+            delay = random.randint(
+                settings.get('delay_min', 60),
+                settings.get('delay_max', 300)
+            )
+            
+            logger.info(f"Scheduling notification in {delay} seconds for order {order_data.get('order_number')}")
+            await asyncio.sleep(delay)
+            
+            # Format message
+            message = await self.format_order_message(order_data, settings)
             
             # Send to channel
-            await self.bot.send_message(
-                chat_id=channel_id,
-                text=message,
-                parse_mode='Markdown',
-                disable_web_page_preview=True
-            )
+            if self.bot:
+                await self.bot.send_message(
+                    chat_id=settings['channel_id'],
+                    text=message,
+                    parse_mode='Markdown'
+                )
+                
+                # Log the notification
+                await self.db.notification_logs.insert_one({
+                    "type": "real_order",
+                    "order_id": order_data.get('_id'),
+                    "order_number": order_data.get('order_number'),
+                    "sent_at": datetime.utcnow(),
+                    "channel_id": settings['channel_id'],
+                    "message": message
+                })
+                
+                logger.info(f"✅ Notification sent for order {order_data.get('order_number')}")
+                return True
             
-            # Log notification
-            await self.db.notification_logs.insert_one({
-                "type": "real_order" if not order_data.get("_id", "").startswith("fake_") else "fake_order",
-                "order_id": order_data.get("_id"),
-                "amount": amount,
-                "country": country,
-                "sent_at": datetime.utcnow(),
-                "channel_id": channel_id
-            })
-            
-            logger.info(f"Notification sent - Amount: ${amount:.2f} to {country}")
-            return True
+            return False
             
         except Exception as e:
             logger.error(f"Error sending notification: {e}")
@@ -271,10 +273,14 @@ class PublicNotificationManager:
     async def send_fake_order(self) -> bool:
         """Send fake order notification with realistic amounts"""
         try:
-            settings = await self.get_notification_settings()
+            settings = await self.get_settings()
             
             if not settings.get("fake_orders_enabled"):
                 logger.info("Fake orders disabled")
+                return False
+            
+            if not settings.get('channel_id'):
+                logger.info("No channel configured")
                 return False
             
             # Get min/max amounts from settings
@@ -311,13 +317,15 @@ class PublicNotificationManager:
             fake_order = {
                 "delivery_country": country,
                 "total_usdt": amount,
-                "_id": f"fake_{datetime.utcnow().timestamp()}"
+                "status": "paid",  # IMPORTANT: Mark as paid so it passes the check
+                "_id": f"fake_{datetime.utcnow().timestamp()}",
+                "order_number": f"FAKE-{random.randint(1000, 9999)}"
             }
             
             logger.info(f"Sending fake order: ${amount:.2f} to {country}")
-            await self.send_notification(fake_order)
             
-            return True
+            # Use the same send_notification method
+            return await self.send_notification(fake_order)
             
         except Exception as e:
             logger.error(f"Error sending fake order: {e}")
@@ -331,7 +339,7 @@ async def fake_order_scheduler():
     """Background task to send fake orders periodically"""
     while True:
         try:
-            settings = await public_notifier.get_notification_settings()
+            settings = await public_notifier.get_settings()
             
             if settings.get("fake_orders_enabled"):
                 orders_per_hour = settings.get("fake_orders_per_hour", 2)

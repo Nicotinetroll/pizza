@@ -19,6 +19,8 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+BOT_USERNAME = os.getenv("BOT_USERNAME", "AnabolicPizzaBot") 
+
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/telegram_shop")
 
 
@@ -26,401 +28,100 @@ MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/telegram_shop"
 # Enhanced Messages with better UX
 
 MESSAGES = {
-
     "welcome": """
+🍕💪 *WELCOME TO ANABOLIC PIZZA, {name}!*
 
-🍕💪 *Welcome to AnabolicPizza, {name}!*
+*The #1 Supplement Delivery Service for Enhanced Athletes* 🏆
 
+You've just entered the realm where:
+- Natty limits don't exist 🚀
+- Gains are guaranteed 📈
+- Your genetics suddenly become "elite" 🧬
+- Shirts become optional (they won't fit anyway) 👕❌
 
+*Why Choose AnabolicPizza?*
+✅ Pharma-grade "supplements" only
+✅ Shipping so discreet, even your gains look natural
+✅ 100% success rate (unlike your natty progress)
+✅ We deliver anywhere in EU (even to your mom's basement)
+✅ Customer support that actually lifts
 
-Hey bro! Ready to get those gains delivered straight to your door? 🚀
+*Your Journey Starts Here:*
+- Browse our "vitamin selection" 💊
+- Pick your poison (literally) ☠️
+- Pay with crypto (keep it anonymous) 🤫
+- Wait 3-7 days for greatness 📦
+- Become a mass monster 🦍
 
+⚠️ *Warning: Side effects include:*
+Looking absolutely diced, excessive confidence, sudden modeling contracts, and the inability to claim natural status.
 
+Ready to kiss your natty card goodbye? Let's GO! 👇
 
-We're the most trusted source for premium supplements in the EU. 
-
-100% anonymous, 100% secure, 100% gains guaranteed!
-
-
-
-What makes us special:
-
-✅ Top quality products only
-
-✅ Discreet EU-wide shipping 
-
-✅ Anonymous crypto payments
-
-✅ Your privacy is sacred to us
-
-
-
-Ready to start your journey? Hit that button below! 👇
-
+_"Remember: You're not cheating, you're just leveling the playing field with genetics!"_ 😈
 """,
-
     
-
-    "shop_categories": """
-
-🏪 *Welcome to the Shop!*
-
-
-
-What are you looking for today? We've organized everything into categories to make your shopping easier.
-
-
-
-Pick a category below to see what we've got! 👇
-
-""",
-
-    
-
     "help": """
+🤝 *ANABOLIC PIZZA HELP CENTER*
 
-🤝 *Need Help? We Got You!*
+*Quick Commands:*
+🍕 /shop - Browse our "supplements" (also: /buy, /gear, /juice, /blast)
+🛒 /cart - Check your anabolic arsenal
+📦 /orders - Track your gains shipments
+📬 /shipping - Delivery intel & stealth info
+💬 /support - Contact our enhanced support team
+🔄 /cycles - Cycle recommendations (not medical advice!)
+💪 /gains - See what's possible when you're not natty
+🤡 /natty - Check your natural status (spoiler: it's gone)
 
-
-
-Here's everything you can do:
-
-
-
-🍕 /shop - Browse our premium selection
-
-🛒 /cart - Check what's in your basket
-
-📦 /orders - Track your order history
-
-❓ /help - You're here now!
-
-
-
-*How to Order:*
-
-1️⃣ Browse categories & pick your products
-
-2️⃣ Add them to cart (we'll remember quantities!)
-
-3️⃣ Checkout with your location
-
-4️⃣ Apply referral code (if you have one)
-
-5️⃣ Pay with crypto - completely anonymous
-
-6️⃣ Sit back and wait for gains to arrive!
-
-
+*How To Order Like a Pro:*
+1️⃣ Browse products by category
+2️⃣ Add your stack to cart
+3️⃣ Enter delivery location (we don't judge)
+4️⃣ Pay with crypto (Bitcoin, ETH, etc.)
+5️⃣ Receive tracking (use Tor browser, bro)
+6️⃣ Get swole AF
 
 *Payment Methods:*
+₿ Bitcoin - The OG anonymous coin
+Ξ Ethereum - Smart contracts for smart gains  
+◎ Solana - Fast like your gains
+💵 USDT - Stable like your hormone levels won't be
 
-We accept BTC, ETH, SOL & USDT
+*Security Tips:*
+🔒 We never ask for personal info
+🔒 Use a VPN (always)
+🔒 Real name, real address (sounds wrong, but it works)
+🔒 We delete all data after delivery
+🔒 Your secret is safe (unlike your natty status)
 
+*FAQ:*
+Q: Is this legal?
+A: We sell "supplements" and "vitamins" 😏
 
+Q: Will I pass a drug test?
+A: HAHAHAHAHAHA no.
 
-*Shipping:*
+Q: Can I stay natty?
+A: You can also stay small. Your choice.
 
-🚚 EU-wide discreet shipping
+Q: Shipping time?
+A: 3-7 days EU wide. Faster than natty gains (which is never).
 
-📦 No names, no addresses stored
-
-🔒 Your privacy is our priority
-
-
-
-Questions? Hit us up anytime! 💬
-
+_"The hardest part isn't the training or diet... it's pretending you're still natural!"_ 💯
 """,
-
     
+    "shop_categories": """
+🏪 *WELCOME TO THE PHARMACY... I MEAN, SUPPLEMENT STORE!*
 
-    "cart_empty": """
+Select your weapon of mass construction below! 💣
 
-🛒 *Your Cart is Empty!*
+Each category is carefully curated for maximum gains and minimum natty status.
 
+Remember: We're not saying you SHOULD use these... but your competition definitely is! 😈
 
-
-Looks like you haven't added anything yet, bro!
-
-
-
-Your muscles are probably crying right now... 😢
-
-Let's fix that! Hit the button below to start shopping! 💪
-
-""",
-
-    
-
-    "product_added": """
-
-✅ *Added to Cart!*
-
-
-
-Nice choice! {quantity}x {product_name} is now in your cart!
-
-
-
-*Cart Total: ${total:.2f}*
-
-
-
-Want to add more? Keep browsing!
-
-Ready to checkout? View your cart! 🛒
-
-""",
-
-    
-
-    "checkout_intro": """
-
-🎯 *Let's Complete Your Order!*
-
-
-
-You're about to get some serious gains delivered! 
-
-Here's what you're getting:
-
-
-
-{order_summary}
-
-
-
-*Total: ${total:.2f} USDT*
-
-
-
-Everything look good? Let's continue! 👇
-
-""",
-
-    
-
-    "ask_location": """
-
-📍 *Where Should We Ship?*
-
-
-
-First, select your country from the list below.
-
-Don't worry - we never store your full address! 
-
-
-
-We just need to know the general area for shipping calculations. 🚚
-
-""",
-
-    
-
-    "ask_city": """
-
-📍 *Almost There!*
-
-
-
-Now just type your city name.
-
-
-
-*Example:* Berlin, Amsterdam, Prague, etc.
-
-
-
-Remember: We don't need your street address or any personal details! 
-
-Your privacy matters to us. 🔒
-
-""",
-
-    
-
-    "ask_referral": """
-
-🎁 *Got a Referral Code?*
-
-
-
-If you have a referral code from a friend or promotion, enter it now to get a discount!
-
-
-
-Just type the code or click 'Skip' if you don't have one.
-
-
-
-*Example:* GAINS20, BULK15, etc.
-
-""",
-
-    
-
-    "referral_applied": """
-
-🎉 *Discount Applied!*
-
-
-
-Sweet! Your referral code *{code}* gives you {discount_text}!
-
-
-
-*Original Total:* ~${original:.2f}~
-
-*Discount:* -${discount_amount:.2f}
-
-*New Total:* ${new_total:.2f} 🔥
-
-
-
-Let's proceed to payment! 💳
-
-""",
-
-    
-
-    "referral_invalid": """
-
-❌ *Invalid Code*
-
-
-
-Sorry bro, that code doesn't work. It might be:
-
-• Expired
-
-• Already used up
-
-• Typed incorrectly
-
-
-
-Want to try another code or continue without discount?
-
-""",
-
-    
-
-    "payment_select": """
-
-💳 *Choose Your Payment Method*
-
-
-
-Almost done! How would you like to pay?
-
-
-
-All payments are 100% anonymous through crypto.
-
-Pick your preferred currency below:
-
-""",
-
-    
-
-    "payment_instructions": """
-
-📋 *Payment Instructions*
-
-
-
-*Order:* `{order_number}`
-
-*Amount:* ${total:.2f} USDT
-
-*Crypto Amount:* {crypto_amount:.6f} {currency}
-
-
-
-Send *exactly* this amount to:
-
-`{address}`
-
-
-
-⏰ This payment expires in 30 minutes
-
-📸 Save the transaction ID after sending!
-
-
-
-Once you send the payment, it usually takes 5-15 minutes to confirm on the blockchain. We'll notify you as soon as it's confirmed!
-
-
-
-*Important:* Send the exact amount for automatic processing!
-
-""",
-
-    
-
-    "payment_confirmed": """
-
-✅ *Payment Confirmed!*
-
-
-
-Woohoo! Your payment has been confirmed! 🎉
-
-
-
-*Order Number:* `{order_number}`
-
-
-
-Your order is now being prepared for shipping. You'll receive it within 3-7 business days (EU shipping).
-
-
-
-Thank you for trusting AnabolicPizza! 
-
-Time to prepare for those gains! 💪
-
-
-
-Want to order more? Let's go! 🍕
-
-""",
-
-    
-
-    "category_empty": """
-
-📭 *Category Empty*
-
-
-
-Looks like we're out of stock in this category right now!
-
-
-
-Our suppliers are working hard to restock. Check back soon or browse other categories! 🔄
-
-""",
-
-    
-
-    "no_categories": """
-
-🚧 *Shop Setup in Progress*
-
-
-
-We're currently setting up our categories. Check back in a few minutes!
-
-
-
-The admins are working on it right now! 🛠️
-
+_"In a world full of natties, be an anabolic warrior!"_ ⚔️
 """
-
 }
 
 
@@ -486,4 +187,3 @@ CRYPTO_CURRENCIES = {
     "USDT": {"name": "Tether", "emoji": "💵", "rate": 1}
 
 }
-

@@ -8,6 +8,7 @@ from bson import ObjectId
 from datetime import datetime
 import logging
 import aiohttp
+import random
 
 from .config import MESSAGES
 from .database import (
@@ -28,6 +29,285 @@ logger = logging.getLogger(__name__)
 # User states storage for conversation flow
 user_states = {}
 user_context = {}  # Store category context
+
+# Add these new command handlers after existing ones
+
+async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /support command with contact info"""
+    user = update.effective_user
+    
+    support_text = """
+💬 *NEED HELP? WE GOT YOUR BACK!*
+
+Unlike your natty friends who "don't understand your journey", we're here 24/7! 💪
+
+*Contact Support:*
+📧 Email: support@anabolicpizza.eu
+💬 Telegram: @APizzaSupport
+🔒 Wickr: APizzaHelp
+
+*Response Time:*
+- Emergency (order issues): 1-2 hours
+- General questions: 6-12 hours
+- "Is this natty?" jokes: Never (we know it's not)
+
+*Before contacting:*
+1. Check your order status with /orders
+2. Read shipping info with /shipping
+3. Check FAQ with /help
+
+Remember: We're as discreet as your gains are obvious! 🤫
+
+_"Customer service so good, even your liver will thank us!"_
+"""
+    
+    keyboard = get_main_menu_keyboard()
+    
+    # Save for chat history
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message="/support",
+        direction="incoming",
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
+    await save_chat_message(
+        telegram_id=user.id,
+        username=user.username,
+        message=support_text,
+        direction="outgoing"
+    )
+    
+    await update.message.reply_text(support_text, reply_markup=keyboard, parse_mode='Markdown')
+
+async def shipping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /shipping command with delivery info"""
+    user = update.effective_user
+    
+    shipping_text = """
+📦 *SHIPPING & DELIVERY INTEL*
+
+*How We Roll:*
+- Stealth Level: Special Forces 🥷
+- Packaging: More discreet than your "vitamin" stash
+- Tracking: Available (but use Tor, bro)
+- Success Rate: 99.7% (better than your natty friend's bench PR)
+
+*Delivery Times:*
+🇩🇪🇳🇱🇧🇪 *Germany/Netherlands/Belgium:* 2-4 days
+🇫🇷🇦🇹🇨🇿 *France/Austria/Czech:* 3-5 days
+🇵🇱🇸🇰🇭🇺 *Poland/Slovakia/Hungary:* 4-6 days
+🇪🇸🇮🇹🇵🇹 *Spain/Italy/Portugal:* 5-7 days
+🇸🇪🇫🇮🇩🇰 *Nordics:* 4-6 days
+🌍 *Rest of EU:* 5-8 days
+
+*Stealth Features:*
+✅ No brand names
+✅ Fake return address
+✅ Looks like supplements (which it technically is 😏)
+✅ Vacuum sealed
+✅ No signature required
+
+*Pro Tips:*
+- Use your real name (yes, really)
+- Normal address (no abandoned warehouses)
+- We don't store addresses after delivery
+- If package goes missing, we reship (once)
+
+_"So stealthy, even your muscles won't know it's coming!"_ 💨
+"""
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🍕 Order Now", callback_data="shop")],
+        [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+    ])
+    
+    await update.message.reply_text(shipping_text, reply_markup=keyboard, parse_mode='Markdown')
+
+async def cycles_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cycles command with cycle advice"""
+    user = update.effective_user
+    
+    cycles_text = """
+🔄 *CYCLE GUIDANCE*
+
+⚠️ *DISCLAIMER: Not medical advice. We just sell pizza, bro!*
+
+*First Timer? (Baby's First Blast):*
+- Start simple (Test only)
+- 300-500mg/week for 12-16 weeks
+- Get bloodwork (seriously)
+- Have AI on hand
+- PCT is NOT optional
+
+*Popular Stacks We "Don't" Recommend:*
+💉 *The Classic:* Test + Dbol
+💉 *The Lean Gains:* Test + Var
+💉 *The Mass Monster:* Test + Deca + Dbol
+💉 *The Suicide Cut:* Test + Tren + Mast
+💉 *The Rich Piana Special:* Everything + Kitchen Sink
+
+*Golden Rules:*
+1. Time on = Time off (minimum)
+2. Bloodwork before, during, after
+3. Start low, go slow
+4. If you can't see abs, you're not ready for Tren
+5. "Just one cycle" - Nobody ever
+
+*PCT Essentials:*
+- Nolva/Clomid (pick one or both)
+- HCG (during cycle is better)
+- Time (be patient, gains goblin)
+
+Remember: The only thing natural about you should be your denial! 😈
+
+_"Eat clen, tren hard, anavar give up!"_
+"""
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛒 Get Your Gear", callback_data="shop")],
+        [InlineKeyboardButton("📚 More Info", callback_data="help")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+    ])
+    
+    await update.message.reply_text(cycles_text, reply_markup=keyboard, parse_mode='Markdown')
+
+async def gains_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /gains command with motivation"""
+    user = update.effective_user
+    
+    gains_text = """
+💪 *GAINS REPORT INCOMING*
+
+*Current Status:*
+✅ Natty Card: REVOKED
+✅ Sleeves: DON'T FIT
+✅ Delts: CAPPED
+✅ Jawline: SQUARED
+✅ Confidence: THROUGH THE ROOF
+✅ Dick: STILL WORKS (if you do it right)
+
+*What Our Customers Say:*
+_"Gained 30lbs in 12 weeks. Parents think I'm on steroids. They're right!"_ - Mike, 23
+
+_"Ex girlfriend wants me back. New girlfriend is hotter. Life is good."_ - Tom, 28
+
+_"Coworkers keep asking about my 'workout routine'. I just smile."_ - James, 31
+
+_"Warning: Doors may appear narrower than before"_ - Everyone
+
+*Expected Results Timeline:*
+Week 1-2: Placebo strength
+Week 3-4: Actual strength  
+Week 5-6: Shirts get tight
+Week 7-8: "You're looking bigger bro"
+Week 9-10: "Are you natty?"
+Week 11-12: "Definitely not natty"
+
+*Side Effects May Include:*
+- Constant pump
+- Inability to wipe ass properly
+- Sudden expertise in endocrinology
+- Urge to give unsolicited gym advice
+- Becoming a "lifetime natural" on Instagram
+
+Ready to transcend humanity? 🚀
+"""
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 BLAST OFF", callback_data="shop")],
+        [InlineKeyboardButton("📊 View Products", callback_data="shop")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+    ])
+    
+    await update.message.reply_text(gains_text, reply_markup=keyboard, parse_mode='Markdown')
+
+async def natty_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /natty command - the ultimate joke"""
+    user = update.effective_user
+    
+    natty_text = """
+🤡 *NATTY STATUS CHECK*
+
+Analyzing... 🔍
+
+*Results:*
+❌ Natty Status: NOT FOUND
+❌ Natty Card: EXPIRED
+❌ Drug Test: WOULD FAIL
+❌ WADA Approved: ABSOLUTELY NOT
+✅ Honesty Level: AT LEAST YOU'RE HERE
+
+*Common "Natty" Excuses Debunked:*
+- "It's just creatine" - Sure, injectable creatine
+- "Good genetics" - From Trenbolone family tree
+- "I eat clean" - Clen* you mean
+- "8 hours sleep" - Plus 250mg Test twice a week
+- "NoFap gave me gains" - No, that was the Deca
+- "Chicken, rice, broccoli" - You forgot the sauce
+
+*Natty Achievements:*
+- 2 years for 10lb muscle ❌
+- Strength plateau after 6 months ❌  
+- Looking DYEL in shirts ❌
+- Depression from slow progress ❌
+- "Respect" from other natties ❌
+
+*Enhanced Achievements:*
+- 12 weeks for 20lb muscle ✅
+- PRs every week ✅
+- Looking juicy 24/7 ✅
+- Confidence of a Greek God ✅
+- Actually enjoying life ✅
+
+*Conclusion:*
+Why natty when you can be a BEAST? 🦍
+
+_"The only thing natural about bodybuilding is the lies we tell!"_
+"""
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💉 Fix My Natty Status", callback_data="shop")],
+        [InlineKeyboardButton("🏠 Embrace the Dark Side", callback_data="home")]
+    ])
+    
+    await update.message.reply_text(natty_text, reply_markup=keyboard, parse_mode='Markdown')
+
+async def handle_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle commands in group chats with better humor"""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from .config import BOT_USERNAME
+    
+    if update.message:
+        try:
+            bot_username = BOT_USERNAME.replace('@', '')
+            
+            # Random funny messages for group
+            group_messages = [
+                "🚨 NATTY POLICE ALERT! Someone's trying to transcend humanity! Hit my DMs to complete your transformation! 💪",
+                "👀 I see someone's ready to leave humanity behind! Slide into my DMs for your ticket to Gainsville! 🚂",
+                "🔥 DYEL detected! Time to fix that! Click below to enter the anabolic kingdom! 👑",
+                "⚠️ Testosterone levels appear dangerously normal! Let's fix that in private! 😈",
+                "🎭 Still pretending to be natty in 2025? Come to my DMs, let's be honest! 💉",
+            ]
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💊 Enter The Anabolic Kingdom", url=f"https://t.me/{bot_username}")],
+                [InlineKeyboardButton("🍕 Get Your Pizza Delivery", url=f"https://t.me/{bot_username}")]
+            ])
+            
+            await update.message.reply_text(
+                random.choice(group_messages),
+                reply_markup=keyboard
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in group handler: {e}")
+    
+    return
 
 # IMPORTANT: Direct notification to frontend
 async def notify_frontend_new_message(telegram_id: int):
@@ -445,29 +725,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == "waiting_referral":
         await handle_referral_input(update, context, text)
     else:
-        # Default response for unexpected messages
-        response_text = (
-            "Hey! I didn't quite understand that. 🤔\n\n"
-            "Here's what I can help you with:\n"
-            "• /shop - Browse our products\n"
-            "• /cart - Check your cart\n"
-            "• /orders - View your orders\n"
-            "• /help - Get help\n\n"
-            "Or just click the buttons below! 👇"
-        )
-        
-        await update.message.reply_text(
-            response_text,
-            reply_markup=get_main_menu_keyboard()
-        )
-        
-        # Save bot response
-        await save_chat_message(
-            telegram_id=user_id,
-            username=username,
-            message=response_text,
-            direction="outgoing"
-        )
+        # JUST IGNORE random messages - don't respond!
+        pass
+        # Removed the annoying fallback message completely
 
 async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str):
     """Handle city input during checkout"""
