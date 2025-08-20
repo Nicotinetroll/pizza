@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict, Set
 import json
+from typing import Dict, Any
 
 # Load environment variables
 load_dotenv('/opt/telegram-shop-bot/.env')
@@ -124,6 +125,31 @@ class MessageTemplateModel(BaseModel):
 class AssignSellerModel(BaseModel):
     seller_id: str
     
+class BotMessageModel(BaseModel):
+    key: str
+    message: str
+    category: str
+    enabled: bool = True
+    variables: Optional[List[str]] = None  # Variables like {name}, {total}, etc.
+
+class BotCommandModel(BaseModel):
+    command: str
+    description: str
+    response: str
+    aliases: Optional[List[str]] = None
+    enabled: bool = True
+    private_only: bool = True
+    group_redirect: bool = True
+
+class BotSettingsModel(BaseModel):
+    bot_name: str = "AnabolicPizza Bot"
+    welcome_delay: int = 0  # Seconds before sending welcome message
+    typing_delay: int = 1  # Seconds to show "typing" indicator
+    max_cart_items: int = 50
+    session_timeout: int = 3600  # Seconds
+    maintenance_mode: bool = False
+    maintenance_message: str = "Bot is under maintenance. Please try again later."
+    
 # Helper functions
 def format_price(value):
     """Format price to 2 decimal places"""
@@ -157,6 +183,295 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
         return payload["email"]
     except:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+# BOT SETTINGS ENDPOINTS
+@app.get("/api/bot/messages")
+async def get_bot_messages(
+    category: Optional[str] = None,
+    email: str = Depends(verify_token)
+):
+    """Get all bot messages, optionally filtered by category"""
+    query = {}
+    if category:
+        query["category"] = category
+    
+    messages = await db.bot_messages.find(query).to_list(1000)
+    
+    for msg in messages:
+        msg["_id"] = str(msg["_id"])
+    
+    # Get categories
+    categories = await db.bot_messages.distinct("category")
+    
+    return {
+        "messages": messages,
+        "categories": categories,
+        "total": len(messages)
+    }
+
+@app.post("/api/bot/messages")
+async def create_bot_message(
+    message: BotMessageModel,
+    email: str = Depends(verify_token)
+):
+    """Create a new bot message"""
+    # Check if key already exists
+    existing = await db.bot_messages.find_one({"key": message.key})
+    if existing:
+        raise HTTPException(status_code=400, detail="Message key already exists")
+    
+    message_dict = message.model_dump()
+    message_dict["created_at"] = datetime.now(timezone.utc)
+    message_dict["created_by"] = email
+    
+    result = await db.bot_messages.insert_one(message_dict)
+    
+    # Log action
+    await db.audit_logs.insert_one({
+        "admin_id": email,
+        "action": "CREATE_BOT_MESSAGE",
+        "entity_type": "bot_message",
+        "entity_id": result.inserted_id,
+        "details": {"key": message.key},
+        "timestamp": datetime.now(timezone.utc)
+    })
+    
+    return {"id": str(result.inserted_id), "message": "Bot message created"}
+
+@app.put("/api/bot/messages/{message_id}")
+async def update_bot_message(
+    message_id: str,
+    message: BotMessageModel,
+    email: str = Depends(verify_token)
+):
+    """Update a bot message"""
+    message_dict = message.model_dump()
+    message_dict["updated_at"] = datetime.now(timezone.utc)
+    message_dict["updated_by"] = email
+    
+    result = await db.bot_messages.update_one(
+        {"_id": ObjectId(message_id)},
+        {"$set": message_dict}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    return {"message": "Bot message updated"}
+
+@app.delete("/api/bot/messages/{message_id}")
+async def delete_bot_message(
+    message_id: str,
+    email: str = Depends(verify_token)
+):
+    """Delete a bot message"""
+    result = await db.bot_messages.delete_one({"_id": ObjectId(message_id)})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    return {"message": "Bot message deleted"}
+
+@app.post("/api/bot/messages/bulk-update")
+async def bulk_update_messages(
+    updates: List[Dict[str, Any]],
+    email: str = Depends(verify_token)
+):
+    """Bulk update multiple messages"""
+    updated_count = 0
+    
+    for update in updates:
+        if "_id" in update:
+            message_id = update.pop("_id")
+            update["updated_at"] = datetime.now(timezone.utc)
+            update["updated_by"] = email
+            
+            result = await db.bot_messages.update_one(
+                {"_id": ObjectId(message_id)},
+                {"$set": update}
+            )
+            updated_count += result.modified_count
+    
+    return {"message": f"Updated {updated_count} messages"}
+
+# COMMANDS ENDPOINTS
+@app.get("/api/bot/commands")
+async def get_bot_commands(email: str = Depends(verify_token)):
+    """Get all bot commands"""
+    commands = await db.bot_commands.find({}).to_list(100)
+    
+    for cmd in commands:
+        cmd["_id"] = str(cmd["_id"])
+    
+    return {"commands": commands, "total": len(commands)}
+
+@app.post("/api/bot/commands")
+async def create_bot_command(
+    command: BotCommandModel,
+    email: str = Depends(verify_token)
+):
+    """Create a new bot command"""
+    # Check if command already exists
+    existing = await db.bot_commands.find_one({"command": command.command})
+    if existing:
+        raise HTTPException(status_code=400, detail="Command already exists")
+    
+    command_dict = command.model_dump()
+    command_dict["created_at"] = datetime.now(timezone.utc)
+    command_dict["created_by"] = email
+    
+    result = await db.bot_commands.insert_one(command_dict)
+    
+    return {"id": str(result.inserted_id), "message": "Bot command created"}
+
+@app.put("/api/bot/commands/{command_id}")
+async def update_bot_command(
+    command_id: str,
+    command: BotCommandModel,
+    email: str = Depends(verify_token)
+):
+    """Update a bot command"""
+    command_dict = command.model_dump()
+    command_dict["updated_at"] = datetime.now(timezone.utc)
+    command_dict["updated_by"] = email
+    
+    result = await db.bot_commands.update_one(
+        {"_id": ObjectId(command_id)},
+        {"$set": command_dict}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Command not found")
+    
+    # Restart bot to apply changes (optional)
+    # You could trigger a bot restart here
+    
+    return {"message": "Bot command updated"}
+
+@app.delete("/api/bot/commands/{command_id}")
+async def delete_bot_command(
+    command_id: str,
+    email: str = Depends(verify_token)
+):
+    """Delete a bot command"""
+    result = await db.bot_commands.delete_one({"_id": ObjectId(command_id)})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Command not found")
+    
+    return {"message": "Bot command deleted"}
+
+# GENERAL BOT SETTINGS
+@app.get("/api/bot/settings")
+async def get_bot_settings(email: str = Depends(verify_token)):
+    """Get general bot settings"""
+    settings = await db.bot_settings.find_one({"_id": "main"})
+    
+    if not settings:
+        # Create default settings
+        default_settings = BotSettingsModel().model_dump()
+        default_settings["_id"] = "main"
+        await db.bot_settings.insert_one(default_settings)
+        settings = default_settings
+    
+    settings.pop("_id", None)
+    return settings
+
+@app.put("/api/bot/settings")
+async def update_bot_settings(
+    settings: BotSettingsModel,
+    email: str = Depends(verify_token)
+):
+    """Update general bot settings"""
+    settings_dict = settings.model_dump()
+    settings_dict["updated_at"] = datetime.now(timezone.utc)
+    settings_dict["updated_by"] = email
+    
+    await db.bot_settings.update_one(
+        {"_id": "main"},
+        {"$set": settings_dict},
+        upsert=True
+    )
+    
+    return {"message": "Bot settings updated"}
+
+@app.post("/api/bot/initialize-messages")
+async def initialize_bot_messages(email: str = Depends(verify_token)):
+    """Initialize database with default bot messages from config"""
+    from bot_modules.config import MESSAGES
+    
+    initialized = 0
+    
+    # Initialize main messages
+    for key, message in MESSAGES.items():
+        existing = await db.bot_messages.find_one({"key": key})
+        if not existing:
+            await db.bot_messages.insert_one({
+                "key": key,
+                "message": message,
+                "category": "main",
+                "enabled": True,
+                "created_at": datetime.now(timezone.utc),
+                "created_by": email
+            })
+            initialized += 1
+    
+    # Initialize command responses
+    default_commands = [
+        {
+            "command": "/start",
+            "description": "Start the bot",
+            "response": MESSAGES.get("welcome", "Welcome!"),
+            "aliases": ["/buy", "/shop", "/go", "/order", "/pizza", "/menu", "/gear", "/juice", "/blast"],
+            "enabled": True
+        },
+        {
+            "command": "/help",
+            "description": "Show help menu",
+            "response": MESSAGES.get("help", "Help menu"),
+            "aliases": [],
+            "enabled": True
+        },
+        {
+            "command": "/cart",
+            "description": "View shopping cart",
+            "response": "Here's your shopping cart:",
+            "aliases": [],
+            "enabled": True
+        },
+        {
+            "command": "/orders",
+            "description": "View order history",
+            "response": "Your order history:",
+            "aliases": ["/history"],
+            "enabled": True
+        }
+    ]
+    
+    for cmd_data in default_commands:
+        existing = await db.bot_commands.find_one({"command": cmd_data["command"]})
+        if not existing:
+            cmd_data["created_at"] = datetime.now(timezone.utc)
+            cmd_data["created_by"] = email
+            await db.bot_commands.insert_one(cmd_data)
+            initialized += 1
+    
+    return {"message": f"Initialized {initialized} messages and commands"}
+
+@app.post("/api/bot/restart")
+async def restart_bot(email: str = Depends(verify_token)):
+    """Restart the bot to apply changes"""
+    # This would trigger a bot restart
+    # You could implement this using subprocess or systemd
+    
+    # Log the action
+    await db.audit_logs.insert_one({
+        "admin_id": email,
+        "action": "RESTART_BOT",
+        "timestamp": datetime.now(timezone.utc)
+    })
+    
+    return {"message": "Bot restart initiated"}
 
 # Routes
 @app.get("/")

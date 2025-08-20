@@ -9,6 +9,7 @@ from datetime import datetime
 import logging
 import aiohttp
 import random
+from .message_loader import message_loader
 
 from .config import MESSAGES
 from .database import (
@@ -386,6 +387,27 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with warm welcome"""
     user = update.effective_user
     
+    # Check maintenance mode
+    if await message_loader.is_maintenance_mode():
+        maintenance_msg = await message_loader.get_maintenance_message()
+        await update.message.reply_text(maintenance_msg, parse_mode='Markdown')
+        return
+    
+    # Load settings
+    settings = await message_loader.load_settings()
+    
+    # Add delay if configured
+    if settings.get("welcome_delay", 0) > 0:
+        await asyncio.sleep(settings["welcome_delay"])
+    
+    # Show typing indicator
+    if settings.get("typing_delay", 0) > 0:
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, 
+            action="typing"
+        )
+        await asyncio.sleep(settings["typing_delay"])
+    
     # Save incoming command
     await save_chat_message(
         telegram_id=user.id,
@@ -408,7 +430,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = await get_user_stats(user.id)
     vip_status = await get_user_vip_status(user.id)
     
-    welcome_text = MESSAGES["welcome"].format(name=user.first_name or "Bro")
+    # Get welcome message from database
+    welcome_text = await message_loader.get_message(
+        "welcome",
+        name=user.first_name or "Bro"
+    )
     
     # Add returning customer message
     if stats["total_orders"] > 0:
@@ -676,6 +702,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     user = update.effective_user
     
+    # Check maintenance mode
+    if await message_loader.is_maintenance_mode():
+        maintenance_msg = await message_loader.get_maintenance_message()
+        await update.message.reply_text(maintenance_msg, parse_mode='Markdown')
+        return
+    
     # Save incoming command
     await save_chat_message(
         telegram_id=user.id,
@@ -686,20 +718,62 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_name=user.last_name
     )
     
+    # Get help message from database
+    help_text = await message_loader.get_message("help")
+    
     keyboard = get_main_menu_keyboard()
     
     # Save outgoing message
     await save_chat_message(
         telegram_id=user.id,
         username=user.username,
-        message=MESSAGES["help"],
+        message=help_text,
         direction="outgoing"
     )
     
     if update.message:
-        await update.message.reply_text(MESSAGES["help"], parse_mode='Markdown', reply_markup=keyboard)
+        await update.message.reply_text(help_text, parse_mode='Markdown', reply_markup=keyboard)
     elif update.callback_query:
-        await update.callback_query.edit_message_text(MESSAGES["help"], parse_mode='Markdown', reply_markup=keyboard)
+        await update.callback_query.edit_message_text(help_text, parse_mode='Markdown', reply_markup=keyboard)
+        
+async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle dynamically loaded commands from database"""
+    user = update.effective_user
+    command = update.message.text
+    
+    # Check maintenance mode
+    if await message_loader.is_maintenance_mode():
+        maintenance_msg = await message_loader.get_maintenance_message()
+        await update.message.reply_text(maintenance_msg, parse_mode='Markdown')
+        return
+    
+    # Get command response from database
+    response = await message_loader.get_command_response(command)
+    
+    if response:
+        # Save incoming command
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message=command,
+            direction="incoming",
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+        # Send response
+        await update.message.reply_text(response, parse_mode='Markdown')
+        
+        # Save outgoing message
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message=response,
+            direction="outgoing"
+        )
+    else:
+        # Command not found, ignore or show default message
+        pass
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages based on user state"""

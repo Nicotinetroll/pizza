@@ -696,4 +696,94 @@ export class ChatWebSocket {
   }
 }
 
+export const botAPI = {
+  // Messages
+  getMessages: async (category = null) => {
+    const params = category ? { category } : {};
+    const response = await api.get('/bot/messages', { params });
+    return response.data;
+  },
+
+  createMessage: async (message) => {
+    if (!message.key || !message.message) {
+      throw new Error('Missing required fields');
+    }
+    const response = await api.post('/bot/messages', message);
+    return response.data;
+  },
+
+  updateMessage: async (id, message) => {
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid message ID');
+    }
+    const response = await api.put(`/bot/messages/${id}`, message);
+    return response.data;
+  },
+
+  deleteMessage: async (id) => {
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid message ID');
+    }
+    const response = await api.delete(`/bot/messages/${id}`);
+    return response.data;
+  },
+
+  bulkUpdateMessages: async (updates) => {
+    const response = await api.post('/bot/messages/bulk-update', updates);
+    return response.data;
+  },
+
+  // Commands
+  getCommands: async () => {
+    const response = await api.get('/bot/commands');
+    return response.data;
+  },
+
+  createCommand: async (command) => {
+    if (!command.command || !command.response) {
+      throw new Error('Missing required fields');
+    }
+    const response = await api.post('/bot/commands', command);
+    return response.data;
+  },
+
+  updateCommand: async (id, command) => {
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid command ID');
+    }
+    const response = await api.put(`/bot/commands/${id}`, command);
+    return response.data;
+  },
+
+  deleteCommand: async (id) => {
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid command ID');
+    }
+    const response = await api.delete(`/bot/commands/${id}`);
+    return response.data;
+  },
+
+  // Settings
+  getSettings: async () => {
+    const response = await api.get('/bot/settings');
+    return response.data;
+  },
+
+  updateSettings: async (settings) => {
+    const response = await api.put('/bot/settings', settings);
+    return response.data;
+  },
+
+  // Utilities
+  initializeMessages: async () => {
+    const response = await api.post('/bot/initialize-messages');
+    return response.data;
+  },
+
+  restartBot: async () => {
+    const response = await api.post('/bot/restart');
+    return response.data;
+  }
+};
+
 export default api;
