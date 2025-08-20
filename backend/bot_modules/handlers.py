@@ -2,7 +2,7 @@
 Enhanced bot command and message handlers with better UX and VIP support
 """
 import asyncio
-from telegram import Update, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from bson import ObjectId
 from datetime import datetime
@@ -278,26 +278,44 @@ _"The only thing natural about bodybuilding is the lies we tell!"_
     await update.message.reply_text(natty_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle commands in group chats with better humor"""
+    """Handle commands in group chats with database settings"""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from .config import BOT_USERNAME
+    from .message_loader import message_loader
     
     if update.message:
         try:
+            command = update.message.text.split()[0].lower() if update.message.text else ""
+            
+            commands = await message_loader.load_commands()
+            cmd_data = commands.get(command)
+            
+            if cmd_data and not cmd_data.get('group_redirect', True):
+                response = cmd_data.get('response', 'Command response')
+                await update.message.reply_text(response, parse_mode='Markdown')
+                return
+            
             bot_username = BOT_USERNAME.replace('@', '')
             
-            # Random funny messages for group
-            group_messages = [
-                "🚨 NATTY POLICE ALERT! Someone's trying to transcend humanity! Hit my DMs to complete your transformation! 💪",
-                "👀 I see someone's ready to leave humanity behind! Slide into my DMs for your ticket to Gainsville! 🚂",
-                "🔥 DYEL detected! Time to fix that! Click below to enter the anabolic kingdom! 👑",
-                "⚠️ Testosterone levels appear dangerously normal! Let's fix that in private! 😈",
-                "🎭 Still pretending to be natty in 2025? Come to my DMs, let's be honest! 💉",
-            ]
+            messages = await message_loader.load_messages()
+            
+            group_messages = []
+            for i in range(1, 10):
+                msg_key = f"group_redirect_{i}"
+                if msg_key in messages:
+                    group_messages.append(messages[msg_key])
+            
+            if not group_messages:
+                group_messages = [
+                    "⚠️ Please use this command in private chat with the bot."
+                ]
+            
+            button1_text = messages.get('group_button_1', '💊 Enter The Anabolic Kingdom')
+            button2_text = messages.get('group_button_2', '🍕 Get Your Pizza Delivery')
             
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("💊 Enter The Anabolic Kingdom", url=f"https://t.me/{bot_username}")],
-                [InlineKeyboardButton("🍕 Get Your Pizza Delivery", url=f"https://t.me/{bot_username}")]
+                [InlineKeyboardButton(button1_text, url=f"https://t.me/{bot_username}")],
+                [InlineKeyboardButton(button2_text, url=f"https://t.me/{bot_username}")]
             ])
             
             await update.message.reply_text(
@@ -737,42 +755,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text(help_text, parse_mode='Markdown', reply_markup=keyboard)
         
 async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle dynamically loaded commands from database"""
-    user = update.effective_user
-    command = update.message.text
-    
-    # Check maintenance mode
-    if await message_loader.is_maintenance_mode():
-        maintenance_msg = await message_loader.get_maintenance_message()
-        await update.message.reply_text(maintenance_msg, parse_mode='Markdown')
+    """TRULY universal handler - everything from database"""
+    if not update.message or not update.message.text:
         return
     
-    # Get command response from database
+    user = update.effective_user
+    command = update.message.text.split()[0].lower()
+    
+    # Get command from database
     response = await message_loader.get_command_response(command)
     
     if response:
-        # Save incoming command
-        await save_chat_message(
-            telegram_id=user.id,
-            username=user.username,
-            message=command,
-            direction="incoming",
-            first_name=user.first_name,
-            last_name=user.last_name
-        )
-        
+        # Replace variables
+        if user:
+            response = response.replace('{name}', user.first_name or 'Friend')
+            response = response.replace('{username}', f"@{user.username}" if user.username else 'User')
+            response = response.replace('{telegram_id}', str(user.id))
+            
         # Send response
         await update.message.reply_text(response, parse_mode='Markdown')
         
-        # Save outgoing message
-        await save_chat_message(
-            telegram_id=user.id,
-            username=user.username,
-            message=response,
-            direction="outgoing"
-        )
+        # Save to history if private
+        if update.effective_chat.type == 'private':
+            await save_chat_message(
+                telegram_id=user.id,
+                username=user.username,
+                message=command,
+                direction="incoming",
+                first_name=user.first_name,
+                last_name=user.last_name
+            )
+            await save_chat_message(
+                telegram_id=user.id,
+                username=user.username,
+                message=response,
+                direction="outgoing"
+            )
     else:
-        # Command not found, ignore or show default message
+        # Unknown command - ignore
         pass
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):

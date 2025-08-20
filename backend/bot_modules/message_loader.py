@@ -77,11 +77,20 @@ class MessageLoader:
         
         command_dict = {}
         for cmd in commands:
+            # Debug log
+            if cmd["command"] == "/mash":
+                logger.info(f"Loading /mash from DB: private_only={cmd.get('private_only')}, group_redirect={cmd.get('group_redirect')}")
+            
             command_dict[cmd["command"]] = {
                 "description": cmd["description"],
                 "response": cmd["response"],
-                "aliases": cmd.get("aliases", [])
+                "aliases": cmd.get("aliases", []),
+                "private_only": cmd.get("private_only", True),
+                "group_redirect": cmd.get("group_redirect", True)
             }
+        
+        self.commands_cache = command_dict
+        return command_dict
         
         # Add default commands if missing
         if not command_dict:
