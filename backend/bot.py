@@ -1,6 +1,6 @@
 """
-AnabolicPizza Bot - Main entry point
-Enhanced with FULL dynamic command loading from database
+COMPLETE FIX FOR backend/bot.py
+This ensures buttons work properly after restart
 """
 
 import logging
@@ -11,7 +11,9 @@ from telegram import Update
 from bot_modules.config import BOT_TOKEN
 from bot_modules.message_loader import message_loader
 from bot_modules.handlers import (
-    handle_message, handle_group_command, handle_dynamic_command
+    handle_message, handle_group_command, handle_dynamic_command,
+    # Import specific handlers for core commands
+    start_command, shop_command, cart_command, orders_command, help_command
 )
 from bot_modules.callbacks import handle_callback
 
@@ -34,6 +36,15 @@ async def register_dynamic_commands(application):
         registered_commands = set()
         registered_group_commands = set()
         
+        # CORE COMMANDS - USE SPECIFIC HANDLERS FOR BUTTONS TO WORK
+        core_commands = {
+            '/start': start_command,
+            '/shop': shop_command,
+            '/cart': cart_command,
+            '/orders': orders_command,
+            '/help': help_command
+        }
+        
         for command, data in commands.items():
             command_name = command.replace('/', '')
             
@@ -46,8 +57,12 @@ async def register_dynamic_commands(application):
                 logger.info(f"Skipping disabled command: /{command_name}")
                 continue
             
-            # ALL commands use dynamic handler - no hardcoded handlers!
-            handler = handle_dynamic_command
+            # USE SPECIFIC HANDLER FOR CORE COMMANDS, DYNAMIC FOR OTHERS
+            if command in core_commands:
+                handler = core_commands[command]
+                logger.info(f"Using specific handler for core command: {command}")
+            else:
+                handler = handle_dynamic_command
             
             # Check scope settings
             private_only = data.get('private_only', True)
@@ -83,14 +98,17 @@ async def register_dynamic_commands(application):
                 registered_commands.add(command_name)
                 logger.info(f"  ✓ Registered /{command_name} for ALL chat types")
             
-            # Register aliases with same scope
+            # Register aliases with same scope AND SAME HANDLER
             for alias in data.get('aliases', []):
                 alias_name = alias.replace('/', '')
                 if alias_name not in registered_commands:
+                    # Use same handler logic for aliases
+                    alias_handler = core_commands.get(alias, handle_dynamic_command)
+                    
                     if private_only:
                         application.add_handler(CommandHandler(
                             alias_name, 
-                            handler, 
+                            alias_handler, 
                             filters=filters.ChatType.PRIVATE
                         ))
                         if group_redirect:
@@ -103,7 +121,7 @@ async def register_dynamic_commands(application):
                     else:
                         application.add_handler(CommandHandler(
                             alias_name, 
-                            handler
+                            alias_handler
                         ))
                     registered_commands.add(alias_name)
                     logger.info(f"    └─ Alias /{alias_name}")
@@ -121,16 +139,16 @@ def register_fallback_commands(application):
     """Register minimal fallback commands if database fails"""
     logger.warning("⚠️ Using fallback commands - database unavailable")
     
-    # Only register absolute minimum
+    # Only register absolute minimum WITH PROPER HANDLERS
     application.add_handler(CommandHandler(
         "start", 
-        handle_dynamic_command, 
+        start_command,  # Use specific handler, not dynamic
         filters=filters.ChatType.PRIVATE
     ))
     
     application.add_handler(CommandHandler(
         "help", 
-        handle_dynamic_command, 
+        help_command,  # Use specific handler, not dynamic
         filters=filters.ChatType.PRIVATE
     ))
     
@@ -189,7 +207,7 @@ def main():
         # Set post_init
         application.post_init = post_init
         
-        # Add callback handler for inline buttons
+        # Add callback handler for inline buttons - THIS IS CRITICAL
         application.add_handler(CallbackQueryHandler(handle_callback))
         
         # Message handler for private chats
@@ -214,9 +232,9 @@ def main():
         
         # Start bot
         logger.info("="*50)
-        logger.info("🍕💪 AnabolicPizza Bot")
-        logger.info("🔧 FULL Dynamic Loading: ENABLED")
-        logger.info("📝 All commands from database")
+        logger.info("🍕💪 AnabolicPizza Bot - FIXED VERSION")
+        logger.info("🔧 Dynamic Loading with Proper Handlers")
+        logger.info("✅ Buttons will work after restart!")
         logger.info("🔄 Auto-reload: 5 minutes")
         logger.info("="*50)
         

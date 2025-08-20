@@ -401,6 +401,9 @@ async def save_chat_message(telegram_id: int, username: str, message: str, direc
     except Exception as e:
         logger.error(f"Error saving chat message: {e}")
 
+# Update the start_command function in backend/bot_modules/handlers.py
+# Replace the existing start_command function with this:
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with warm welcome"""
     user = update.effective_user
@@ -426,15 +429,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await asyncio.sleep(settings["typing_delay"])
     
-    # Save incoming command
-    await save_chat_message(
-        telegram_id=user.id,
-        username=user.username,
-        message="/start",
-        direction="incoming",
-        first_name=user.first_name,
-        last_name=user.last_name
-    )
+    # Save incoming command ONLY if it's from user message, not callback
+    if update.message:
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message="/start",
+            direction="incoming",
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
     
     # Save user to database
     await create_or_update_user({
@@ -462,19 +466,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if vip_status["is_vip"]:
         welcome_text += f"\n👑 *VIP Member* - {vip_status['discount']}% OFF on everything!"
     
+    # ALWAYS GET THE KEYBOARD - THIS IS THE FIX!
     keyboard = get_main_menu_keyboard()
     
-    # Save outgoing message
-    await save_chat_message(
-        telegram_id=user.id,
-        username=user.username,
-        message=welcome_text,
-        direction="outgoing"
-    )
-    
+    # Save outgoing message ONLY if it's from user message
     if update.message:
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message=welcome_text,
+            direction="outgoing"
+        )
+        # ALWAYS send with keyboard when replying to message
         await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
     elif update.callback_query:
+        # For callback queries, also always include keyboard
         await update.callback_query.edit_message_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -754,6 +760,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.callback_query:
         await update.callback_query.edit_message_text(help_text, parse_mode='Markdown', reply_markup=keyboard)
         
+
 async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """TRULY universal handler - everything from database"""
     if not update.message or not update.message.text:
@@ -762,7 +769,24 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
     user = update.effective_user
     command = update.message.text.split()[0].lower()
     
-    # Get command from database
+    # SPECIAL HANDLING FOR CORE COMMANDS - FIX THE KEYBOARD ISSUE
+    if command == '/start':
+        await start_command(update, context)
+        return
+    elif command == '/shop':
+        await shop_command(update, context)
+        return
+    elif command == '/cart':
+        await cart_command(update, context)
+        return
+    elif command == '/orders':
+        await orders_command(update, context)
+        return
+    elif command == '/help':
+        await help_command(update, context)
+        return
+    
+    # For other commands, get from database
     response = await message_loader.get_command_response(command)
     
     if response:
@@ -771,9 +795,22 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
             response = response.replace('{name}', user.first_name or 'Friend')
             response = response.replace('{username}', f"@{user.username}" if user.username else 'User')
             response = response.replace('{telegram_id}', str(user.id))
-            
-        # Send response
-        await update.message.reply_text(response, parse_mode='Markdown')
+        
+        # CHECK IF THIS IS A MENU COMMAND THAT NEEDS KEYBOARD
+        keyboard = None
+        if any(keyword in command for keyword in ['start', 'menu', 'home', 'help']):
+            keyboard = get_main_menu_keyboard()
+        elif 'shop' in command or 'product' in command:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🍕 Browse Shop", callback_data="shop")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+            ])
+        
+        # Send response with or without keyboard
+        if keyboard:
+            await update.message.reply_text(response, reply_markup=keyboard, parse_mode='Markdown')
+        else:
+            await update.message.reply_text(response, parse_mode='Markdown')
         
         # Save to history if private
         if update.effective_chat.type == 'private':
@@ -791,9 +828,6 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
                 message=response,
                 direction="outgoing"
             )
-    else:
-        # Unknown command - ignore
-        pass
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages based on user state"""
