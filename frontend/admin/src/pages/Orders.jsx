@@ -9,9 +9,10 @@ import {
   MagnifyingGlassIcon, ReloadIcon, CalendarIcon, DownloadIcon,
   ChevronDownIcon, ChevronRightIcon, ClockIcon, CheckCircledIcon,
   CrossCircledIcon, RocketIcon, CopyIcon, ExternalLinkIcon,
-  InfoCircledIcon, IdCardIcon, GlobeIcon, CubeIcon, PersonIcon
+  InfoCircledIcon, IdCardIcon, GlobeIcon, CubeIcon, PersonIcon,
+  DotsHorizontalIcon
 } from '@radix-ui/react-icons';
-import { ordersAPI } from '../services/api';
+import { ordersAPI, usersAPI } from '../services/api';
 
 // Order status colors and icons
 const statusConfig = {
@@ -22,11 +23,136 @@ const statusConfig = {
   cancelled: { color: 'red', icon: CrossCircledIcon, label: 'Cancelled' }
 };
 
-// Order detail modal component
+// Mobile Order Card Component
+const MobileOrderCard = ({ order, onStatusUpdate, onViewDetails }) => {
+  const StatusIcon = statusConfig[order.status]?.icon || ClockIcon;
+  const isMobile = window.innerWidth < 768;
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={!isMobile ? { scale: 1.01 } : {}}
+      transition={{ duration: 0.2 }}
+    >
+      <Card style={{
+        background: 'rgba(20, 20, 25, 0.6)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255, 255, 255, 0.05)',
+        padding: isMobile ? '12px' : '16px',
+        marginBottom: '12px'
+      }}>
+        {/* Header */}
+        <Flex align="center" justify="between" mb="3">
+          <Flex align="center" gap="2">
+            <Avatar
+              size={isMobile ? '1' : '2'}
+              fallback={order.username?.slice(0, 2).toUpperCase() || order.telegram_id?.toString().slice(-2) || 'NA'}
+              style={{
+                background: `linear-gradient(135deg, ${statusConfig[order.status]?.color || '#8b5cf6'} 0%, ${statusConfig[order.status]?.color || '#8b5cf6'}90 100%)`
+              }}
+            />
+            <Box>
+              <Code size={isMobile ? '1' : '2'} style={{ color: '#8b5cf6' }}>
+                {order.order_number}
+              </Code>
+              <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', display: 'block' }}>
+                {new Date(order.created_at).toLocaleDateString()}
+              </Text>
+            </Box>
+          </Flex>
+          
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <IconButton size="1" variant="ghost">
+                <DotsHorizontalIcon width="16" height="16" />
+              </IconButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content>
+              <DropdownMenu.Item onClick={() => onViewDetails(order)}>
+                <ExternalLinkIcon width="14" height="14" />
+                View Details
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              {Object.entries(statusConfig).map(([value, config]) => (
+                <DropdownMenu.Item
+                  key={value}
+                  onClick={() => onStatusUpdate(order._id, value)}
+                  disabled={order.status === value}
+                >
+                  <Flex align="center" gap="2">
+                    <config.icon width="14" height="14" />
+                    Set as {config.label}
+                  </Flex>
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+        </Flex>
+
+        {/* Customer Info */}
+        <Flex align="center" justify="between" mb="3">
+          <Flex align="center" gap="2">
+            <PersonIcon width="14" height="14" style={{ opacity: 0.6 }} />
+            <Text size={isMobile ? '1' : '2'}>
+              @{order.username || `user${order.telegram_id}`}
+            </Text>
+          </Flex>
+          <Flex align="center" gap="1">
+            <GlobeIcon width="12" height="12" style={{ opacity: 0.6 }} />
+            <Text size={isMobile ? '1' : '2'} style={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+              {order.delivery_city}
+            </Text>
+          </Flex>
+        </Flex>
+
+        {/* Items Preview */}
+        {!isMobile && order.items && order.items.length > 0 && (
+          <Box style={{
+            padding: '8px',
+            background: 'rgba(255, 255, 255, 0.02)',
+            borderRadius: '6px',
+            marginBottom: '12px'
+          }}>
+            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+              {order.items.length} item{order.items.length > 1 ? 's' : ''}: {order.items.map(i => `${i.quantity}x ${i.product_name}`).join(', ').slice(0, 50)}...
+            </Text>
+          </Box>
+        )}
+
+        {/* Footer */}
+        <Flex align="center" justify="between">
+          <Flex align="center" gap="2">
+            <Badge 
+              size={isMobile ? '1' : '2'}
+              color={statusConfig[order.status]?.color}
+              variant="soft"
+            >
+              <StatusIcon width="12" height="12" />
+              {statusConfig[order.status]?.label}
+            </Badge>
+            {order.has_discount && (
+              <Badge size="1" color="green" variant="soft">
+                -{order.discount_amount?.toFixed(0)}
+              </Badge>
+            )}
+          </Flex>
+          
+          <Text size={isMobile ? '3' : '4'} weight="bold" style={{ color: '#10b981' }}>
+            ${order.total_usdt?.toFixed(2)}
+          </Text>
+        </Flex>
+      </Card>
+    </motion.div>
+  );
+};
+
+// Order detail modal component (optimized for mobile)
 const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
   const [newStatus, setNewStatus] = useState(order?.status || 'pending');
   const [updating, setUpdating] = useState(false);
   const [copiedText, setCopiedText] = useState('');
+  const isMobile = window.innerWidth < 768;
 
   useEffect(() => {
     if (order) {
@@ -55,146 +181,165 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onClose}>
-      <Dialog.Content style={{ maxWidth: '700px' }}>
+      <Dialog.Content style={{ 
+        maxWidth: isMobile ? '95%' : '700px',
+        maxHeight: '90vh',
+        margin: isMobile ? '10px' : 'auto',
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)'
+      }}>
         <Dialog.Title>
-          <Flex align="center" gap="3">
+          <Flex align="center" gap={isMobile ? '2' : '3'}>
             <Avatar
-              size="3"
+              size={isMobile ? '2' : '3'}
               fallback={order.order_number?.slice(-2) || 'NA'}
               style={{
                 background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'
               }}
             />
             <Box>
-              <Heading size="4">Order Details</Heading>
-              <Code size="2" style={{ color: '#8b5cf6' }}>{order.order_number}</Code>
+              <Heading size={isMobile ? '3' : '4'}>Order Details</Heading>
+              <Code size={isMobile ? '1' : '2'} style={{ color: '#8b5cf6' }}>{order.order_number}</Code>
             </Box>
           </Flex>
         </Dialog.Title>
 
         <Dialog.Description>
-          <ScrollArea style={{ maxHeight: '60vh' }}>
-            <Flex direction="column" gap="4" mt="4">
+          <ScrollArea style={{ maxHeight: isMobile ? '60vh' : '60vh' }}>
+            <Flex direction="column" gap={isMobile ? '3' : '4'} mt={isMobile ? '3' : '4'}>
               {/* Status Section */}
               <Card style={{
                 background: 'rgba(139, 92, 246, 0.05)',
-                border: '1px solid rgba(139, 92, 246, 0.2)'
+                border: '1px solid rgba(139, 92, 246, 0.2)',
+                padding: isMobile ? '12px' : '16px'
               }}>
                 <Flex align="center" justify="between">
                   <Flex align="center" gap="2">
-                    <StatusIcon width="20" height="20" style={{ color: `var(--${statusConfig[order.status]?.color}-9)` }} />
-                    <Text size="3" weight="medium">Current Status</Text>
+                    <StatusIcon width={isMobile ? '16' : '20'} height={isMobile ? '16' : '20'} style={{ color: `var(--${statusConfig[order.status]?.color}-9)` }} />
+                    <Text size={isMobile ? '2' : '3'} weight="medium">Current Status</Text>
                   </Flex>
-                  <Badge size="2" color={statusConfig[order.status]?.color}>
+                  <Badge size={isMobile ? '1' : '2'} color={statusConfig[order.status]?.color}>
                     {statusConfig[order.status]?.label}
                   </Badge>
                 </Flex>
               </Card>
 
               {/* Customer Info */}
-              <Card>
-                <Heading size="3" mb="3">Customer Information</Heading>
-                <Grid columns="2" gap="3">
+              <Card style={{ padding: isMobile ? '12px' : '16px' }}>
+                <Heading size={isMobile ? '2' : '3'} mb={isMobile ? '2' : '3'}>Customer Information</Heading>
+                <Grid columns={isMobile ? '1' : '2'} gap={isMobile ? '2' : '3'}>
                   <Flex align="center" gap="2">
-                    <PersonIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                    <Text size="2">
+                    <PersonIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} style={{ opacity: 0.6 }} />
+                    <Text size={isMobile ? '1' : '2'}>
                       Telegram: <Code size="1">@{order.username || `user${order.telegram_id}`}</Code>
                     </Text>
                   </Flex>
                   <Flex align="center" gap="2">
-                    <IdCardIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                    <Text size="2">
+                    <IdCardIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} style={{ opacity: 0.6 }} />
+                    <Text size={isMobile ? '1' : '2'}>
                       ID: <Code size="1">{order.telegram_id}</Code>
                     </Text>
                   </Flex>
                   <Flex align="center" gap="2">
-                    <GlobeIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                    <Text size="2">
+                    <GlobeIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} style={{ opacity: 0.6 }} />
+                    <Text size={isMobile ? '1' : '2'}>
                       Location: <strong>{order.delivery_city}, {order.delivery_country}</strong>
                     </Text>
                   </Flex>
                   <Flex align="center" gap="2">
-                    <CalendarIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                    <Text size="2">
+                    <CalendarIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} style={{ opacity: 0.6 }} />
+                    <Text size={isMobile ? '1' : '2'}>
                       Created: {new Date(order.created_at).toLocaleString()}
                     </Text>
                   </Flex>
-                  {order.paid_at && (
-                    <Flex align="center" gap="2">
-                      <CheckCircledIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                      <Text size="2">
-                        Paid: {new Date(order.paid_at).toLocaleString()}
-                      </Text>
-                    </Flex>
-                  )}
-                  {order.first_name && (
-                    <Flex align="center" gap="2">
-                      <PersonIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                      <Text size="2">
-                        Name: <strong>{order.first_name} {order.last_name}</strong>
-                      </Text>
-                    </Flex>
-                  )}
                 </Grid>
               </Card>
 
               {/* Order Items */}
-              <Card>
-                <Heading size="3" mb="3">Order Items</Heading>
-                <Table.Root variant="surface">
-                  <Table.Header>
-                    <Table.Row>
-                      <Table.ColumnHeaderCell>Product</Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell>Price</Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell>Qty</Table.ColumnHeaderCell>
-                      <Table.ColumnHeaderCell>Total</Table.ColumnHeaderCell>
-                    </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
+              <Card style={{ padding: isMobile ? '12px' : '16px' }}>
+                <Heading size={isMobile ? '2' : '3'} mb={isMobile ? '2' : '3'}>Order Items</Heading>
+                {isMobile ? (
+                  <Flex direction="column" gap="2">
                     {order.items?.map((item, idx) => (
-                      <Table.Row key={idx}>
-                        <Table.Cell>
-                          <Flex align="center" gap="2">
-                            <CubeIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                            <Text size="2">{item.product_name}</Text>
-                          </Flex>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <Text size="2">${item.price_usdt?.toFixed(2)}</Text>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <Badge variant="soft">{item.quantity}</Badge>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <Text size="2" weight="medium">${item.subtotal_usdt?.toFixed(2)}</Text>
-                        </Table.Cell>
-                      </Table.Row>
+                      <Box key={idx} style={{
+                        padding: '10px',
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255, 255, 255, 0.05)'
+                      }}>
+                        <Flex justify="between" mb="1">
+                          <Text size="2" weight="medium">{item.product_name}</Text>
+                          <Badge size="1" variant="soft">{item.quantity}x</Badge>
+                        </Flex>
+                        <Flex justify="between">
+                          <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                            ${item.price_usdt?.toFixed(2)} each
+                          </Text>
+                          <Text size="2" weight="bold" style={{ color: '#10b981' }}>
+                            ${item.subtotal_usdt?.toFixed(2)}
+                          </Text>
+                        </Flex>
+                      </Box>
                     ))}
-                  </Table.Body>
-                </Table.Root>
+                  </Flex>
+                ) : (
+                  <Table.Root variant="surface">
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.ColumnHeaderCell>Product</Table.ColumnHeaderCell>
+                        <Table.ColumnHeaderCell>Price</Table.ColumnHeaderCell>
+                        <Table.ColumnHeaderCell>Qty</Table.ColumnHeaderCell>
+                        <Table.ColumnHeaderCell>Total</Table.ColumnHeaderCell>
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {order.items?.map((item, idx) => (
+                        <Table.Row key={idx}>
+                          <Table.Cell>
+                            <Flex align="center" gap="2">
+                              <CubeIcon width="16" height="16" style={{ opacity: 0.6 }} />
+                              <Text size="2">{item.product_name}</Text>
+                            </Flex>
+                          </Table.Cell>
+                          <Table.Cell>
+                            <Text size="2">${item.price_usdt?.toFixed(2)}</Text>
+                          </Table.Cell>
+                          <Table.Cell>
+                            <Badge variant="soft">{item.quantity}</Badge>
+                          </Table.Cell>
+                          <Table.Cell>
+                            <Text size="2" weight="medium">${item.subtotal_usdt?.toFixed(2)}</Text>
+                          </Table.Cell>
+                        </Table.Row>
+                      ))}
+                    </Table.Body>
+                  </Table.Root>
+                )}
 
                 {/* Totals */}
-                <Separator size="4" my="3" />
+                <Separator size="4" my={isMobile ? '2' : '3'} />
                 <Flex direction="column" gap="2">
                   {order.has_discount && (
                     <>
                       <Flex justify="between">
-                        <Text size="2">Subtotal:</Text>
-                        <Text size="2">${((order.total_usdt || 0) + (order.discount_amount || 0)).toFixed(2)}</Text>
+                        <Text size={isMobile ? '1' : '2'}>Subtotal:</Text>
+                        <Text size={isMobile ? '1' : '2'}>${((order.total_usdt || 0) + (order.discount_amount || 0)).toFixed(2)}</Text>
                       </Flex>
                       <Flex justify="between">
-                        <Text size="2" style={{ color: '#10b981' }}>
+                        <Text size={isMobile ? '1' : '2'} style={{ color: '#10b981' }}>
                           Discount ({order.referral_code}):
                         </Text>
-                        <Text size="2" style={{ color: '#10b981' }}>
+                        <Text size={isMobile ? '1' : '2'} style={{ color: '#10b981' }}>
                           -${order.discount_amount?.toFixed(2)}
                         </Text>
                       </Flex>
                     </>
                   )}
                   <Flex justify="between">
-                    <Text size="3" weight="bold">Total:</Text>
-                    <Text size="3" weight="bold" style={{ color: '#8b5cf6' }}>
+                    <Text size={isMobile ? '2' : '3'} weight="bold">Total:</Text>
+                    <Text size={isMobile ? '2' : '3'} weight="bold" style={{ color: '#8b5cf6' }}>
                       ${order.total_usdt?.toFixed(2)}
                     </Text>
                   </Flex>
@@ -203,18 +348,25 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
 
               {/* Payment Info */}
               {order.payment && (
-                <Card>
-                  <Heading size="3" mb="3">Payment Information</Heading>
-                  <Flex direction="column" gap="3">
+                <Card style={{ padding: isMobile ? '12px' : '16px' }}>
+                  <Heading size={isMobile ? '2' : '3'} mb={isMobile ? '2' : '3'}>Payment Information</Heading>
+                  <Flex direction="column" gap={isMobile ? '2' : '3'}>
                     <Flex align="center" justify="between">
-                      <Text size="2">Method:</Text>
-                      <Badge size="2" color="purple">{order.payment.method}</Badge>
+                      <Text size={isMobile ? '1' : '2'}>Method:</Text>
+                      <Badge size={isMobile ? '1' : '2'} color="purple">{order.payment.method}</Badge>
                     </Flex>
                     {order.payment.transaction_id && (
-                      <Flex align="center" justify="between">
-                        <Text size="2">Transaction:</Text>
+                      <Box>
+                        <Text size={isMobile ? '1' : '2'} style={{ marginBottom: '8px' }}>Transaction:</Text>
                         <Flex align="center" gap="2">
-                          <Code size="1" style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <Code size="1" style={{ 
+                            flex: 1,
+                            padding: '8px',
+                            background: 'rgba(255, 255, 255, 0.03)',
+                            borderRadius: '4px',
+                            wordBreak: 'break-all',
+                            fontSize: isMobile ? '10px' : '11px'
+                          }}>
                             {order.payment.transaction_id}
                           </Code>
                           <IconButton
@@ -229,13 +381,7 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
                             )}
                           </IconButton>
                         </Flex>
-                      </Flex>
-                    )}
-                    {order.referral_code && (
-                      <Flex align="center" justify="between">
-                        <Text size="2">Referral:</Text>
-                        <Badge color="green" variant="soft">{order.referral_code}</Badge>
-                      </Flex>
+                      </Box>
                     )}
                   </Flex>
                 </Card>
@@ -244,10 +390,11 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
               {/* Status Update */}
               <Card style={{
                 background: 'rgba(20, 20, 25, 0.6)',
-                border: '1px solid rgba(255, 255, 255, 0.1)'
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                padding: isMobile ? '12px' : '16px'
               }}>
-                <Heading size="3" mb="3">Update Status</Heading>
-                <Flex gap="3" align="center">
+                <Heading size={isMobile ? '2' : '3'} mb={isMobile ? '2' : '3'}>Update Status</Heading>
+                <Flex gap={isMobile ? '2' : '3'} align="center" direction={isMobile ? 'column' : 'row'}>
                   <Select.Root value={newStatus} onValueChange={setNewStatus} style={{ flex: 1 }}>
                     <Select.Trigger style={{ width: '100%' }}>
                       <Flex align="center" gap="2">
@@ -270,6 +417,7 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
                     onClick={handleStatusUpdate}
                     disabled={updating || newStatus === order.status}
                     style={{
+                      width: isMobile ? '100%' : 'auto',
                       background: newStatus !== order.status ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' : 'rgba(255, 255, 255, 0.1)',
                       cursor: updating || newStatus === order.status ? 'not-allowed' : 'pointer',
                       opacity: updating || newStatus === order.status ? 0.5 : 1
@@ -283,9 +431,9 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
           </ScrollArea>
         </Dialog.Description>
 
-        <Flex gap="3" mt="6" justify="end">
+        <Flex gap="3" mt={isMobile ? '4' : '6'} justify="end">
           <Dialog.Close>
-            <Button variant="soft">Close</Button>
+            <Button variant="soft" style={{ width: isMobile ? '100%' : 'auto' }}>Close</Button>
           </Dialog.Close>
         </Flex>
       </Dialog.Content>
@@ -302,35 +450,18 @@ const Orders = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState(new Set());
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
-  // Mock some orders with usernames for testing
   useEffect(() => {
-    const mockOrders = [
-      {
-        _id: '1',
-        order_number: 'ORD-2024-0001',
-        telegram_id: '6264469295',
-        username: 'mashmast3r',
-        delivery_city: 'Paris',
-        delivery_country: 'France',
-        total_usdt: 215.86,
-        discount_amount: 24.00,
-        has_discount: true,
-        referral_code: 'GAYLORD',
-        status: 'paid',
-        created_at: '2025-08-18T10:47:36',
-        paid_at: '2025-08-18T10:47:41',
-        items: [
-          { product_name: 'Test E 250', quantity: 2, price_usdt: 50, subtotal_usdt: 100 },
-          { product_name: 'Anavar 50mg', quantity: 1, price_usdt: 139.86, subtotal_usdt: 139.86 }
-        ],
-        payment: {
-          method: 'ETH',
-          transaction_id: 'DEMO_9ccaa85f2b3d4e4795a1b2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1w2x3y4z5'
-        }
-      }
-    ];
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
+  useEffect(() => {
     fetchOrders();
   }, []);
 
@@ -338,14 +469,34 @@ const Orders = () => {
     setLoading(true);
     try {
       const response = await ordersAPI.getAll();
-      // Add mock username if not present
-      const ordersWithUsernames = (response.orders || []).map(order => ({
-        ...order,
-        username: order.username || `user${order.telegram_id}`
-      }));
+      
+      // Fetch user details for orders that have telegram_id but no username
+      const ordersWithUsernames = await Promise.all(
+        (response.orders || []).map(async (order) => {
+          // If order already has username, use it
+          if (order.username) {
+            return order;
+          }
+          
+          // Try to find user by telegram_id to get username
+          try {
+            const usersResponse = await usersAPI.getAll();
+            const user = usersResponse.users?.find(u => u.telegram_id === order.telegram_id);
+            if (user) {
+              return { ...order, username: user.username };
+            }
+          } catch (err) {
+            console.error('Error fetching user for order:', err);
+          }
+          
+          return order;
+        })
+      );
+      
       setOrders(ordersWithUsernames);
     } catch (error) {
       console.error('Error fetching orders:', error);
+      setOrders([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -417,46 +568,62 @@ const Orders = () => {
   }
 
   return (
-    <Box>
-      {/* Header */}
-      <Flex align="center" justify="between" mb="6">
+    <Box style={{ paddingBottom: isMobile ? '80px' : '0' }}>
+      {/* Header - Mobile Optimized */}
+      <Flex 
+        align={isMobile ? 'start' : 'center'} 
+        justify="between" 
+        mb={isMobile ? '4' : '6'}
+        direction={isMobile ? 'column' : 'row'}
+        gap={isMobile ? '3' : '0'}
+      >
         <Box>
-          <Heading size="8" weight="bold" style={{ marginBottom: '8px' }}>
-            Orders Management
+          <Heading size={isMobile ? '6' : '8'} weight="bold" style={{ marginBottom: '8px' }}>
+            Orders
           </Heading>
-          <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-            Manage and track all customer orders
-          </Text>
+          {!isMobile && (
+            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+              Manage and track all customer orders
+            </Text>
+          )}
         </Box>
 
-        <Flex gap="3">
-          <Button
-            size="3"
-            variant="surface"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            style={{
-              background: 'rgba(20, 20, 25, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)'
-            }}
+        <Button
+          size={isMobile ? '2' : '3'}
+          variant="surface"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          style={{
+            background: 'rgba(20, 20, 25, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            width: isMobile ? '100%' : 'auto'
+          }}
+        >
+          <motion.div
+            animate={refreshing ? { rotate: 360 } : {}}
+            transition={{ duration: 1, repeat: refreshing ? Infinity : 0, ease: "linear" }}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           >
-            <motion.div
-              animate={refreshing ? { rotate: 360 } : {}}
-              transition={{ duration: 1, repeat: refreshing ? Infinity : 0, ease: "linear" }}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-            >
-              <ReloadIcon width="18" height="18" />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </motion.div>
-          </Button>
-        </Flex>
+            <ReloadIcon width={isMobile ? '16' : '18'} height={isMobile ? '16' : '18'} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </motion.div>
+        </Button>
       </Flex>
 
-      {/* Stats Cards */}
-      <Grid columns={{ initial: '2', sm: '3', lg: '5' }} gap="4" mb="6">
+      {/* Stats Cards - Mobile Responsive */}
+      <Grid 
+        columns={{ 
+          initial: '2',
+          xs: '2',
+          sm: '3',
+          lg: '5'
+        }} 
+        gap={isMobile ? '2' : '4'} 
+        mb={isMobile ? '4' : '6'}
+      >
         {Object.entries(stats).map(([key, value]) => {
           const config = key === 'total' ? 
-            { color: '#8b5cf6', label: 'Total Orders', icon: RocketIcon } :
+            { color: '#8b5cf6', label: 'Total', icon: RocketIcon } :
             statusConfig[key];
           
           return (
@@ -464,33 +631,33 @@ const Orders = () => {
               key={key}
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              whileHover={{ y: -2 }}
+              whileHover={!isMobile ? { y: -2 } : {}}
             >
               <Card style={{
                 background: 'rgba(20, 20, 25, 0.6)',
                 backdropFilter: 'blur(20px)',
                 border: '1px solid rgba(255, 255, 255, 0.05)',
-                padding: '20px'
+                padding: isMobile ? '12px' : '20px'
               }}>
                 <Flex align="center" justify="between">
                   <Box>
-                    <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
+                    <Text size={isMobile ? '1' : '2'} style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
                       {config?.label || key}
                     </Text>
-                    <Text size="6" weight="bold">
+                    <Text size={isMobile ? '5' : '6'} weight="bold">
                       {value}
                     </Text>
                   </Box>
                   <Box style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '10px',
+                    width: isMobile ? '32px' : '40px',
+                    height: isMobile ? '32px' : '40px',
+                    borderRadius: isMobile ? '8px' : '10px',
                     background: `${config?.color || '#8b5cf6'}20`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center'
                   }}>
-                    {config?.icon && <config.icon width="20" height="20" style={{ color: config?.color || '#8b5cf6' }} />}
+                    {config?.icon && <config.icon width={isMobile ? '16' : '20'} height={isMobile ? '16' : '20'} style={{ color: config?.color || '#8b5cf6' }} />}
                   </Box>
                 </Flex>
               </Card>
@@ -499,19 +666,23 @@ const Orders = () => {
         })}
       </Grid>
 
-      {/* Filters */}
+      {/* Filters - Mobile Optimized */}
       <Card style={{
         background: 'rgba(20, 20, 25, 0.6)',
         backdropFilter: 'blur(20px)',
         border: '1px solid rgba(255, 255, 255, 0.05)',
-        padding: '20px',
-        marginBottom: '24px'
+        padding: isMobile ? '12px' : '20px',
+        marginBottom: isMobile ? '16px' : '24px'
       }}>
-        <Flex gap="3" align="center">
-          <Box style={{ flex: 1, position: 'relative' }}>
+        <Flex 
+          gap={isMobile ? '2' : '3'} 
+          align="center"
+          direction={isMobile ? 'column' : 'row'}
+        >
+          <Box style={{ flex: 1, position: 'relative', width: '100%' }}>
             <MagnifyingGlassIcon 
-              width="16" 
-              height="16" 
+              width={isMobile ? '14' : '16'}
+              height={isMobile ? '14' : '16'}
               style={{
                 position: 'absolute',
                 left: '12px',
@@ -523,17 +694,17 @@ const Orders = () => {
             />
             <input
               type="text"
-              placeholder="Search by order number, telegram ID, username, or city..."
+              placeholder={isMobile ? "Search orders..." : "Search by order number, telegram ID, username, or city..."}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{
                 width: '100%',
-                padding: '12px 12px 12px 40px',
+                padding: isMobile ? '10px 10px 10px 36px' : '12px 12px 12px 40px',
                 background: 'rgba(255, 255, 255, 0.03)',
                 border: 'none',
                 borderRadius: '8px',
                 color: '#fff',
-                fontSize: '14px',
+                fontSize: isMobile ? '14px' : '14px',
                 outline: 'none',
                 transition: 'all 0.2s'
               }}
@@ -550,23 +721,24 @@ const Orders = () => {
 
           <Select.Root value={statusFilter} onValueChange={setStatusFilter}>
             <Select.Trigger
+              size={isMobile ? '2' : '3'}
               variant="surface"
               style={{
                 background: 'rgba(255, 255, 255, 0.05)',
                 border: '1px solid rgba(255, 255, 255, 0.1)',
-                minWidth: '150px'
+                minWidth: isMobile ? '100%' : '150px'
               }}
             >
               <Flex align="center" gap="2">
                 {statusFilter === 'all' ? (
                   <>
-                    <InfoCircledIcon width="16" height="16" />
-                    <Text>All Status</Text>
+                    <InfoCircledIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} />
+                    <Text size={isMobile ? '2' : '3'}>All Status</Text>
                   </>
                 ) : (
                   <>
-                    {React.createElement(statusConfig[statusFilter]?.icon || ClockIcon, { width: 16, height: 16 })}
-                    <Text>{statusConfig[statusFilter]?.label}</Text>
+                    {React.createElement(statusConfig[statusFilter]?.icon || ClockIcon, { width: isMobile ? 14 : 16, height: isMobile ? 14 : 16 })}
+                    <Text size={isMobile ? '2' : '3'}>{statusConfig[statusFilter]?.label}</Text>
                   </>
                 )}
               </Flex>
@@ -592,250 +764,263 @@ const Orders = () => {
         </Flex>
       </Card>
 
-      {/* Orders Table */}
-      <Card style={{
-        background: 'rgba(20, 20, 25, 0.6)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255, 255, 255, 0.05)',
-        padding: 0,
-        overflow: 'hidden'
-      }}>
-        {filteredOrders.length === 0 ? (
-          <Flex align="center" justify="center" style={{ padding: '60px' }}>
-            <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+      {/* Orders Display - Mobile Cards vs Desktop Table */}
+      {filteredOrders.length === 0 ? (
+        <Card style={{
+          background: 'rgba(20, 20, 25, 0.6)',
+          backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(255, 255, 255, 0.05)',
+          padding: isMobile ? '40px 20px' : '60px'
+        }}>
+          <Flex align="center" justify="center">
+            <Text size={isMobile ? '2' : '3'} style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
               {searchTerm || statusFilter !== 'all' ? 'No orders found matching your filters' : 'No orders yet'}
             </Text>
           </Flex>
-        ) : (
-          <Box style={{ overflowX: 'auto' }}>
-            <Table.Root variant="surface">
-              <Table.Header>
-                <Table.Row>
-                  <Table.ColumnHeaderCell width="40px"></Table.ColumnHeaderCell>
-                  <Table.ColumnHeaderCell>Order #</Table.ColumnHeaderCell>
-                  <Table.ColumnHeaderCell>Date</Table.ColumnHeaderCell>
-                  <Table.ColumnHeaderCell>Customer</Table.ColumnHeaderCell>
-                  <Table.ColumnHeaderCell>Location</Table.ColumnHeaderCell>
-                  <Table.ColumnHeaderCell>Total</Table.ColumnHeaderCell>
-                  <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
-                  <Table.ColumnHeaderCell width="60px">View</Table.ColumnHeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {filteredOrders.map((order, idx) => {
-                  const isExpanded = expandedRows.has(order._id);
-                  const StatusIcon = statusConfig[order.status]?.icon || ClockIcon;
-                  
-                  return (
-                    <React.Fragment key={order._id}>
-                      <Table.Row
-                        onClick={() => toggleRowExpansion(order._id)}
-                        style={{
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                          background: isExpanded ? 'rgba(139, 92, 246, 0.05)' : 'transparent',
-                          verticalAlign: 'middle'
-                        }}
-                      >
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <motion.div
-                            animate={{ rotate: isExpanded ? 90 : 0 }}
-                            transition={{ duration: 0.2 }}
-                          >
-                            <ChevronRightIcon width="16" height="16" />
-                          </motion.div>
-                        </Table.Cell>
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <Code size="2" style={{ color: '#8b5cf6' }}>
-                            {order.order_number}
-                          </Code>
-                        </Table.Cell>
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <Flex direction="column" gap="1">
-                            <Text size="2">{new Date(order.created_at).toLocaleDateString()}</Text>
-                            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                              {new Date(order.created_at).toLocaleTimeString()}
-                            </Text>
-                          </Flex>
-                        </Table.Cell>
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <Flex align="center" gap="2">
-                            <Avatar
-                              size="1"
-                              fallback={order.username?.slice(0, 2).toUpperCase() || 'NA'}
-                              style={{
-                                background: `linear-gradient(135deg, ${statusConfig[order.status]?.color || '#8b5cf6'} 0%, ${statusConfig[order.status]?.color || '#8b5cf6'}90 100%)`
-                              }}
-                            />
-                            <Flex direction="column">
-                              <Text size="2">@{order.username}</Text>
-                              {order.first_name && (
-                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                                  {order.first_name} {order.last_name}
-                                </Text>
-                              )}
-                            </Flex>
-                          </Flex>
-                        </Table.Cell>
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <Flex align="center" gap="1">
-                            <GlobeIcon width="14" height="14" style={{ opacity: 0.6 }} />
-                            <Text size="2">{order.delivery_city}, {order.delivery_country}</Text>
-                          </Flex>
-                        </Table.Cell>
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <Flex direction="column" gap="1">
-                            <Text size="2" weight="bold" style={{ color: '#10b981' }}>
-                              ${order.total_usdt?.toFixed(2)}
-                            </Text>
-                            {order.has_discount && (
-                              <Badge size="1" color="green" variant="soft">
-                                -${order.discount_amount?.toFixed(2)}
-                              </Badge>
-                            )}
-                          </Flex>
-                        </Table.Cell>
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <DropdownMenu.Root>
-                            <DropdownMenu.Trigger>
-                              <Button
-                                variant="soft"
-                                color={statusConfig[order.status]?.color}
-                                size="2"
-                                onClick={(e) => e.stopPropagation()}
-                                style={{ cursor: 'pointer' }}
-                              >
-                                <Flex align="center" gap="2">
-                                  <StatusIcon width="14" height="14" />
-                                  <Text size="2">{statusConfig[order.status]?.label}</Text>
-                                  <ChevronDownIcon width="14" height="14" />
-                                </Flex>
-                              </Button>
-                            </DropdownMenu.Trigger>
-                            <DropdownMenu.Content>
-                              {Object.entries(statusConfig).map(([value, config]) => (
-                                <DropdownMenu.Item
-                                  key={value}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    updateOrderStatus(order._id, value);
-                                  }}
-                                >
-                                  <Flex align="center" gap="2">
-                                    <config.icon width="14" height="14" />
-                                    {config.label}
-                                  </Flex>
-                                </DropdownMenu.Item>
-                              ))}
-                            </DropdownMenu.Content>
-                          </DropdownMenu.Root>
-                        </Table.Cell>
-                        <Table.Cell style={{ verticalAlign: 'middle' }}>
-                          <IconButton
-                            size="2"
-                            variant="soft"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openOrderModal(order);
+        </Card>
+      ) : (
+        <>
+          {isMobile ? (
+            // Mobile Cards View
+            <Box>
+              {filteredOrders.map((order) => (
+                <MobileOrderCard
+                  key={order._id}
+                  order={order}
+                  onStatusUpdate={updateOrderStatus}
+                  onViewDetails={openOrderModal}
+                />
+              ))}
+            </Box>
+          ) : (
+            // Desktop Table View
+            <Card style={{
+              background: 'rgba(20, 20, 25, 0.6)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              padding: 0,
+              overflow: 'hidden'
+            }}>
+              <Box style={{ overflowX: 'auto' }}>
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell width="40px"></Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Order #</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Date</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Customer</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Location</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Total</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell width="60px">View</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {filteredOrders.map((order, idx) => {
+                      const isExpanded = expandedRows.has(order._id);
+                      const StatusIcon = statusConfig[order.status]?.icon || ClockIcon;
+                      
+                      return (
+                        <React.Fragment key={order._id}>
+                          <Table.Row
+                            onClick={() => toggleRowExpansion(order._id)}
+                            style={{
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              background: isExpanded ? 'rgba(139, 92, 246, 0.05)' : 'transparent'
                             }}
                           >
-                            <ExternalLinkIcon width="16" height="16" />
-                          </IconButton>
-                        </Table.Cell>
-                      </Table.Row>
-
-                      {/* Expanded Row Content */}
-                      <AnimatePresence>
-                        {isExpanded && (
-                          <Table.Row>
-                            <Table.Cell colSpan={8} style={{ padding: 0 }}>
+                            <Table.Cell>
                               <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.3 }}
+                                animate={{ rotate: isExpanded ? 90 : 0 }}
+                                transition={{ duration: 0.2 }}
                               >
-                                <Box style={{
-                                  padding: '20px',
-                                  background: 'rgba(139, 92, 246, 0.02)',
-                                  borderTop: '1px solid rgba(139, 92, 246, 0.1)',
-                                  borderBottom: '1px solid rgba(139, 92, 246, 0.1)'
-                                }}>
-                                  <Grid columns={{ initial: '1', md: '2' }} gap="4">
-                                    <Box>
-                                      <Heading size="3" mb="3">Order Items</Heading>
-                                      <Flex direction="column" gap="2">
-                                        {order.items?.map((item, i) => (
-                                          <Flex key={i} align="center" justify="between" style={{
-                                            padding: '10px',
-                                            background: 'rgba(255, 255, 255, 0.02)',
-                                            borderRadius: '8px'
-                                          }}>
-                                            <Flex align="center" gap="2">
-                                              <CubeIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                                              <Text size="2">{item.quantity}x {item.product_name}</Text>
-                                            </Flex>
-                                            <Text size="2" weight="medium">
-                                              ${item.subtotal_usdt?.toFixed(2)}
-                                            </Text>
-                                          </Flex>
-                                        ))}
-                                      </Flex>
-                                    </Box>
-                                    
-                                    <Box>
-                                      <Heading size="3" mb="3">Payment Details</Heading>
-                                      <Flex direction="column" gap="2">
-                                        <Flex justify="between">
-                                          <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                                            Method:
-                                          </Text>
-                                          <Badge>{order.payment?.method || 'N/A'}</Badge>
-                                        </Flex>
-                                        {order.payment?.transaction_id && (
-                                          <Box>
-                                            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '4px' }}>
-                                              Transaction:
-                                            </Text>
-                                            <Code size="1" style={{ 
-                                              display: 'block',
-                                              padding: '8px',
-                                              background: 'rgba(255, 255, 255, 0.03)',
-                                              borderRadius: '4px',
-                                              wordBreak: 'break-all',
-                                              fontSize: '11px'
-                                            }}>
-                                              {order.payment.transaction_id}
-                                            </Code>
-                                          </Box>
-                                        )}
-                                        {order.referral_code && (
-                                          <Flex justify="between">
-                                            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                                              Referral:
-                                            </Text>
-                                            <Badge color="green" variant="soft">
-                                              {order.referral_code}
-                                            </Badge>
-                                          </Flex>
-                                        )}
-                                      </Flex>
-                                    </Box>
-                                  </Grid>
-                                </Box>
+                                <ChevronRightIcon width="16" height="16" />
                               </motion.div>
                             </Table.Cell>
+                            <Table.Cell>
+                              <Code size="2" style={{ color: '#8b5cf6' }}>
+                                {order.order_number}
+                              </Code>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <Flex direction="column" gap="1">
+                                <Text size="2">{new Date(order.created_at).toLocaleDateString()}</Text>
+                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                  {new Date(order.created_at).toLocaleTimeString()}
+                                </Text>
+                              </Flex>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <Flex align="center" gap="2">
+                                <Avatar
+                                  size="1"
+                                  fallback={order.username?.slice(0, 2).toUpperCase() || order.telegram_id?.toString().slice(-2) || 'NA'}
+                                  style={{
+                                    background: `linear-gradient(135deg, ${statusConfig[order.status]?.color || '#8b5cf6'} 0%, ${statusConfig[order.status]?.color || '#8b5cf6'}90 100%)`
+                                  }}
+                                />
+                                <Flex direction="column">
+                                  <Text size="2">@{order.username || `user${order.telegram_id}`}</Text>
+                                  {order.first_name && (
+                                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                      {order.first_name} {order.last_name}
+                                    </Text>
+                                  )}
+                                </Flex>
+                              </Flex>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <Flex align="center" gap="1">
+                                <GlobeIcon width="14" height="14" style={{ opacity: 0.6 }} />
+                                <Text size="2">{order.delivery_city}, {order.delivery_country}</Text>
+                              </Flex>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <Flex direction="column" gap="1">
+                                <Text size="2" weight="bold" style={{ color: '#10b981' }}>
+                                  ${order.total_usdt?.toFixed(2)}
+                                </Text>
+                                {order.has_discount && (
+                                  <Badge size="1" color="green" variant="soft">
+                                    -${order.discount_amount?.toFixed(2)}
+                                  </Badge>
+                                )}
+                              </Flex>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <DropdownMenu.Root>
+                                <DropdownMenu.Trigger>
+                                  <Button
+                                    variant="soft"
+                                    color={statusConfig[order.status]?.color}
+                                    size="2"
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    <Flex align="center" gap="2">
+                                      <StatusIcon width="14" height="14" />
+                                      <Text size="2">{statusConfig[order.status]?.label}</Text>
+                                      <ChevronDownIcon width="14" height="14" />
+                                    </Flex>
+                                  </Button>
+                                </DropdownMenu.Trigger>
+                                <DropdownMenu.Content>
+                                  {Object.entries(statusConfig).map(([value, config]) => (
+                                    <DropdownMenu.Item
+                                      key={value}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateOrderStatus(order._id, value);
+                                      }}
+                                    >
+                                      <Flex align="center" gap="2">
+                                        <config.icon width="14" height="14" />
+                                        {config.label}
+                                      </Flex>
+                                    </DropdownMenu.Item>
+                                  ))}
+                                </DropdownMenu.Content>
+                              </DropdownMenu.Root>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <IconButton
+                                size="2"
+                                variant="soft"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openOrderModal(order);
+                                }}
+                              >
+                                <ExternalLinkIcon width="16" height="16" />
+                              </IconButton>
+                            </Table.Cell>
                           </Table.Row>
-                        )}
-                      </AnimatePresence>
-                    </React.Fragment>
-                  );
-                })}
-              </Table.Body>
-            </Table.Root>
-          </Box>
-        )}
-      </Card>
+
+                          {/* Expanded Row Content */}
+                          <AnimatePresence>
+                            {isExpanded && (
+                              <Table.Row>
+                                <Table.Cell colSpan={8} style={{ padding: 0 }}>
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.3 }}
+                                  >
+                                    <Box style={{
+                                      padding: '20px',
+                                      background: 'rgba(139, 92, 246, 0.02)',
+                                      borderTop: '1px solid rgba(139, 92, 246, 0.1)',
+                                      borderBottom: '1px solid rgba(139, 92, 246, 0.1)'
+                                    }}>
+                                      <Grid columns="2" gap="4">
+                                        <Box>
+                                          <Heading size="3" mb="3">Order Items</Heading>
+                                          <Flex direction="column" gap="2">
+                                            {order.items?.map((item, i) => (
+                                              <Flex key={i} align="center" justify="between" style={{
+                                                padding: '10px',
+                                                background: 'rgba(255, 255, 255, 0.02)',
+                                                borderRadius: '8px'
+                                              }}>
+                                                <Flex align="center" gap="2">
+                                                  <CubeIcon width="16" height="16" style={{ opacity: 0.6 }} />
+                                                  <Text size="2">{item.quantity}x {item.product_name}</Text>
+                                                </Flex>
+                                                <Text size="2" weight="medium">
+                                                  ${item.subtotal_usdt?.toFixed(2)}
+                                                </Text>
+                                              </Flex>
+                                            ))}
+                                          </Flex>
+                                        </Box>
+                                        
+                                        <Box>
+                                          <Heading size="3" mb="3">Payment Details</Heading>
+                                          <Flex direction="column" gap="2">
+                                            <Flex justify="between">
+                                              <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                                                Method:
+                                              </Text>
+                                              <Badge>{order.payment?.method || 'N/A'}</Badge>
+                                            </Flex>
+                                            {order.payment?.transaction_id && (
+                                              <Box>
+                                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '4px' }}>
+                                                  Transaction:
+                                                </Text>
+                                                <Code size="1" style={{ 
+                                                  display: 'block',
+                                                  padding: '8px',
+                                                  background: 'rgba(255, 255, 255, 0.03)',
+                                                  borderRadius: '4px',
+                                                  wordBreak: 'break-all',
+                                                  fontSize: '11px'
+                                                }}>
+                                                  {order.payment.transaction_id}
+                                                </Code>
+                                              </Box>
+                                            )}
+                                          </Flex>
+                                        </Box>
+                                      </Grid>
+                                    </Box>
+                                  </motion.div>
+                                </Table.Cell>
+                              </Table.Row>
+                            )}
+                          </AnimatePresence>
+                        </React.Fragment>
+                      );
+                    })}
+                  </Table.Body>
+                </Table.Root>
+              </Box>
+            </Card>
+          )}
+        </>
+      )}
 
       {/* Order Detail Modal */}
       <OrderDetailModal

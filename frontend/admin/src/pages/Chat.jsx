@@ -9,152 +9,10 @@ import {
     PaperPlaneIcon, MagnifyingGlassIcon, ReloadIcon, TrashIcon,
     PersonIcon, ClockIcon, CheckIcon, DoubleArrowUpIcon,
     ChatBubbleIcon, BellIcon, DotsHorizontalIcon, StarIcon,
-    ExclamationTriangleIcon, LockClosedIcon
+    ExclamationTriangleIcon, LockClosedIcon, ArrowLeftIcon,
+    Cross2Icon, CheckCircledIcon
 } from '@radix-ui/react-icons';
 import { chatAPI } from '../services/api';
-
-// WebSocket Manager Class - simplified and more robust
-class ChatWebSocketManager {
-    constructor(onMessage) {
-        this.ws = null;
-        this.onMessage = onMessage;
-        this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 10;
-        this.reconnectDelay = 1000;
-        this.pingInterval = null;
-        this.isIntentionalDisconnect = false;
-        this.connectionPromise = null;
-    }
-
-    async connect() {
-        if (this.connectionPromise) {
-            return this.connectionPromise;
-        }
-
-        this.connectionPromise = new Promise((resolve) => {
-            const token = localStorage.getItem('token');
-            if (!token) {
-                console.warn('No token found, skipping WebSocket connection');
-                resolve(false);
-                return;
-            }
-
-            try {
-                // Parse token to get email
-                const payload = JSON.parse(atob(token.split('.')[1]));
-                const email = payload.email;
-
-                // Build WebSocket URL - use environment variable or fallback to smart detection
-                let wsUrl;
-
-                if (import.meta.env.VITE_WS_URL) {
-                    // Use environment variable if available
-                    const wsBase = import.meta.env.VITE_WS_URL;
-                    wsUrl = `${wsBase}/ws/chat/${encodeURIComponent(email)}`;
-                } else {
-                    // Fallback to smart detection for backwards compatibility
-                    const isLocalDev = window.location.hostname === 'localhost' ||
-                        window.location.hostname === '127.0.0.1';
-
-                    if (isLocalDev) {
-                        // Local development
-                        wsUrl = `ws://localhost:3000/ws/chat/${encodeURIComponent(email)}`;
-                    } else {
-                        // Production - direct to backend port
-                        wsUrl = `ws://80.78.27.174:8000/ws/chat/${encodeURIComponent(email)}`;
-                    }
-                }
-
-                console.log('🔌 Connecting to WebSocket:', wsUrl);
-
-                this.ws = new WebSocket(wsUrl);
-
-                this.ws.onopen = () => {
-                    console.log('✅ Chat WebSocket connected successfully');
-                    this.reconnectAttempts = 0;
-                    this.reconnectDelay = 1000;
-
-                    // Start ping to keep alive
-                    this.pingInterval = setInterval(() => {
-                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                            this.ws.send(JSON.stringify({ type: 'ping' }));
-                        }
-                    }, 30000);
-
-                    resolve(true);
-                };
-
-                this.ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        console.log('📨 WebSocket message received:', data);
-
-                        if (data.type !== 'pong' && this.onMessage) {
-                            this.onMessage(data);
-                        }
-                    } catch (error) {
-                        console.error('Error parsing WebSocket message:', error);
-                    }
-                };
-
-                this.ws.onclose = (event) => {
-                    console.log('🔌 WebSocket disconnected', event.code, event.reason);
-                    this.cleanup();
-                    this.connectionPromise = null;
-
-                    if (!this.isIntentionalDisconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
-                        setTimeout(() => this.reconnect(), this.reconnectDelay);
-                    }
-
-                    resolve(false);
-                };
-
-                this.ws.onerror = (error) => {
-                    console.error('❌ WebSocket error:', error);
-                    this.connectionPromise = null;
-                    resolve(false);
-                };
-
-            } catch (error) {
-                console.error('Error setting up WebSocket:', error);
-                this.connectionPromise = null;
-                resolve(false);
-            }
-        });
-
-        return this.connectionPromise;
-    }
-
-    async reconnect() {
-        if (this.isIntentionalDisconnect) return;
-
-        this.reconnectAttempts++;
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
-
-        console.log(`🔄 Reconnecting WebSocket (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-        await this.connect();
-    }
-
-    cleanup() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
-        }
-    }
-
-    disconnect() {
-        this.isIntentionalDisconnect = true;
-        this.cleanup();
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
-        }
-    }
-
-    isConnected() {
-        return this.ws && this.ws.readyState === WebSocket.OPEN;
-    }
-}
 
 const Chat = () => {
     // State
@@ -170,146 +28,54 @@ const Chat = () => {
     const [unreadOnly, setUnreadOnly] = useState(false);
     const [quickReplies, setQuickReplies] = useState([]);
     const [stats, setStats] = useState(null);
-    const [wsConnected, setWsConnected] = useState(false);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+    const [showMobileChat, setShowMobileChat] = useState(false);
 
     // Refs
     const messagesEndRef = useRef(null);
-    const wsManagerRef = useRef(null);
     const typingTimeoutRef = useRef(null);
     const selectedConversationRef = useRef(null);
+
+    // Detect mobile
+    useEffect(() => {
+        const handleResize = () => {
+            setIsMobile(window.innerWidth < 768);
+        };
+        
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     // Update ref when selectedConversation changes
     useEffect(() => {
         selectedConversationRef.current = selectedConversation;
     }, [selectedConversation]);
 
-    // WebSocket message handler - memoized without dependencies
-    const handleWebSocketMessage = useCallback((data) => {
-        console.log('📨 Processing WebSocket message:', data);
+    // Initialize data on mount
+    useEffect(() => {
+        let mounted = true;
 
-        if (data.type === 'new_message' && data.message) {
-            const message = data.message;
+        const initializeApp = async () => {
+            if (!mounted) return;
 
-            // ALWAYS update conversations list
-            setConversations(prev => {
-                const updatedConvs = [...prev];
-                const convIndex = updatedConvs.findIndex(c => c.telegram_id === message.telegram_id);
+            await fetchConversations();
+            await fetchQuickReplies();
+            await fetchStats();
+        };
 
-                if (convIndex >= 0) {
-                    // Update existing conversation
-                    const updatedConv = {
-                        ...updatedConvs[convIndex],
-                        last_message: message.message,
-                        last_message_time: message.timestamp
-                    };
+        initializeApp();
 
-                    // Increment unread only if incoming and not selected
-                    if (message.direction === 'incoming') {
-                        const currentSelected = selectedConversationRef.current;
-                        if (!currentSelected || currentSelected.telegram_id !== message.telegram_id) {
-                            updatedConv.unread_count = (updatedConvs[convIndex].unread_count || 0) + 1;
-                        }
-                    }
-
-                    updatedConvs[convIndex] = updatedConv;
-                    // Move to top
-                    const [updated] = updatedConvs.splice(convIndex, 1);
-                    updatedConvs.unshift(updated);
-                } else if (message.direction === 'incoming') {
-                    // New conversation for incoming messages
-                    updatedConvs.unshift({
-                        telegram_id: message.telegram_id,
-                        username: message.username || `user${message.telegram_id}`,
-                        first_name: message.first_name || '',
-                        last_name: message.last_name || '',
-                        last_message: message.message,
-                        last_message_time: message.timestamp,
-                        unread_count: 1,
-                        total_messages: 1
-                    });
-                }
-
-                return updatedConvs;
-            });
-
-            // ALWAYS update messages if this conversation is selected
-            const currentSelected = selectedConversationRef.current;
-            if (currentSelected && currentSelected.telegram_id === message.telegram_id) {
-                setMessages(prev => {
-                    // Avoid duplicates by checking _id
-                    const exists = prev.some(m => m._id === message._id);
-                    if (!exists) {
-                        console.log('✅ Adding new message to chat');
-                        return [...prev, message];
-                    }
-                    return prev;
-                });
-
-                // Auto-mark as read if incoming to selected conversation
-                if (message.direction === 'incoming') {
-                    chatAPI.markAsRead(message.telegram_id).catch(console.error);
-                    // Update unread count to 0
-                    setConversations(prev =>
-                        prev.map(conv =>
-                            conv.telegram_id === message.telegram_id
-                                ? { ...conv, unread_count: 0 }
-                                : conv
-                        )
-                    );
-                }
-            }
-
-            // Show notification only for messages not in selected conversation
-            if (message.direction === 'incoming') {
-                const currentSelected = selectedConversationRef.current;
-                if (!currentSelected || currentSelected.telegram_id !== message.telegram_id) {
-                    // Browser notification
-                    if ('Notification' in window && Notification.permission === 'granted') {
-                        new Notification(`New message from @${message.username || 'User'}`, {
-                            body: message.message.substring(0, 100),
-                            icon: '/icon.png',
-                            tag: `msg-${message.telegram_id}`
-                        });
-                    }
-
-                    // Play sound
-                    try {
-                        const audio = new Audio('/notification.mp3');
-                        audio.volume = 0.3;
-                        audio.play().catch(() => {});
-                    } catch (e) {}
-                }
-            }
-
-            // Update stats for unread messages
-            setStats(prev => {
-                if (!prev) return prev;
-
-                if (message.direction === 'incoming') {
-                    const currentSelected = selectedConversationRef.current;
-                    if (!currentSelected || currentSelected.telegram_id !== message.telegram_id) {
-                        return {
-                            ...prev,
-                            unread_messages: (prev.unread_messages || 0) + 1,
-                            today_messages: (prev.today_messages || 0) + 1
-                        };
-                    }
-                }
-                return prev;
-            });
-        } else if (data.type === 'messages_read') {
-            // Mark conversation as read
-            setConversations(prev =>
-                prev.map(conv =>
-                    conv.telegram_id === data.telegram_id
-                        ? { ...conv, unread_count: 0 }
-                        : conv
-                )
-            );
+        // Request notification permission
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
         }
-    }, []); // No dependencies - use refs for latest values
 
-    // Long polling for instant updates when new messages arrive
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    // Long polling for instant updates
     useEffect(() => {
         let mounted = true;
 
@@ -329,67 +95,43 @@ const Chat = () => {
                     const data = await response.json();
 
                     if (data.new_message && mounted) {
-                        console.log('📨 New message notification received! Refreshing...');
+                        console.log('📨 New message notification received!');
 
                         // Refresh conversations list
                         const convResponse = await chatAPI.getConversations(unreadOnly);
-                        setConversations(convResponse.conversations);
+                        setConversations(convResponse.conversations || []);
 
                         // If message is for selected conversation, refresh messages
                         if (selectedConversationRef.current &&
                             selectedConversationRef.current.telegram_id === data.telegram_id) {
                             const msgResponse = await chatAPI.getMessages(data.telegram_id);
-                            setMessages(msgResponse.messages);
+                            setMessages(msgResponse.messages || []);
+                        }
+
+                        // Play notification sound if not active conversation
+                        if (!selectedConversationRef.current || 
+                            selectedConversationRef.current.telegram_id !== data.telegram_id) {
+                            try {
+                                const audio = new Audio('/notification.mp3');
+                                audio.volume = 0.3;
+                                audio.play().catch(() => {});
+                            } catch (e) {}
                         }
                     }
                 } catch (error) {
-                    // Silently handle errors and retry
-                    console.log('Long polling reconnecting...');
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
         };
 
-        // Start long polling
         waitForMessages();
 
         return () => {
             mounted = false;
         };
-    }, []);
-
-
-    // Initialize data on mount
-    useEffect(() => {
-        let mounted = true;
-
-        const initializeApp = async () => {
-            if (!mounted) return;
-
-            // Load initial data
-            await fetchConversations();
-            await fetchQuickReplies();
-            await fetchStats();
-        };
-
-        initializeApp();
-
-        // Request notification permission
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
-
-        return () => {
-            mounted = false;
-        };
-    }, []); // Empty dependency array - run only once on mount
+    }, [unreadOnly]);
 
     // Auto-scroll to bottom when new messages
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
-
-// Auto-scroll to bottom when new messages
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
@@ -401,7 +143,7 @@ const Chat = () => {
     const fetchConversations = async () => {
         try {
             const response = await chatAPI.getConversations(unreadOnly);
-            setConversations(response.conversations);
+            setConversations(response.conversations || []);
             return response.conversations;
         } catch (error) {
             console.error('Error fetching conversations:', error);
@@ -414,7 +156,7 @@ const Chat = () => {
     const fetchQuickReplies = async () => {
         try {
             const response = await chatAPI.getQuickReplies();
-            setQuickReplies(response.replies);
+            setQuickReplies(response.replies || []);
         } catch (error) {
             console.error('Error fetching quick replies:', error);
         }
@@ -431,41 +173,19 @@ const Chat = () => {
         }
     };
 
-    const fetchMessagesForConversation = async (telegramId) => {
-        try {
-            const response = await chatAPI.getMessages(telegramId);
-            if (selectedConversationRef.current?.telegram_id === telegramId) {
-                setMessages(response.messages);
-            }
-            return response.messages;
-        } catch (error) {
-            console.error('Error fetching messages:', error);
-            return [];
-        }
-    };
-
     const handleRefresh = async () => {
         setRefreshing(true);
 
         try {
-            // Refresh everything
-            const [newConversations, newStats] = await Promise.all([
+            await Promise.all([
                 fetchConversations(),
                 fetchStats()
             ]);
 
-            // Refresh messages for selected conversation
             if (selectedConversation) {
-                await fetchMessagesForConversation(selectedConversation.telegram_id);
+                const response = await chatAPI.getMessages(selectedConversation.telegram_id);
+                setMessages(response.messages || []);
             }
-
-            // Try to reconnect WebSocket if disconnected
-            if (wsManagerRef.current && !wsManagerRef.current.isConnected()) {
-                const connected = await wsManagerRef.current.connect();
-                setWsConnected(connected);
-            }
-
-            console.log('✅ Refresh complete');
         } catch (error) {
             console.error('Error during refresh:', error);
         } finally {
@@ -476,16 +196,19 @@ const Chat = () => {
     const selectConversation = async (conversation) => {
         setSelectedConversation(conversation);
         selectedConversationRef.current = conversation;
+        
+        if (isMobile) {
+            setShowMobileChat(true);
+        }
 
         try {
             const response = await chatAPI.getMessages(conversation.telegram_id);
-            setMessages(response.messages);
+            setMessages(response.messages || []);
 
             // Mark as read
             if (conversation.unread_count > 0) {
                 await chatAPI.markAsRead(conversation.telegram_id);
 
-                // Update local state
                 setConversations(prev =>
                     prev.map(conv =>
                         conv.telegram_id === conversation.telegram_id
@@ -494,7 +217,6 @@ const Chat = () => {
                     )
                 );
 
-                // Update stats
                 if (stats) {
                     setStats(prev => ({
                         ...prev,
@@ -536,9 +258,7 @@ const Chat = () => {
 
         try {
             const response = await chatAPI.sendMessage(selectedConversation.telegram_id, messageText);
-            console.log('✅ Message sent successfully');
-
-            // Replace temp message ID with real one
+            
             if (response.message_id) {
                 setMessages(prev =>
                     prev.map(m =>
@@ -549,8 +269,7 @@ const Chat = () => {
                 );
             }
         } catch (error) {
-            console.error('❌ Error sending message:', error);
-            // Remove optimistic message
+            console.error('Error sending message:', error);
             setMessages(prev => prev.filter(m => m._id !== tempId));
             setMessageInput(messageText);
             alert('Failed to send message');
@@ -575,25 +294,32 @@ const Chat = () => {
 
         try {
             await chatAPI.deleteConversation(telegramId);
-            fetchConversations();
+            await fetchConversations();
             if (selectedConversation?.telegram_id === telegramId) {
                 setSelectedConversation(null);
                 selectedConversationRef.current = null;
                 setMessages([]);
+                if (isMobile) {
+                    setShowMobileChat(false);
+                }
             }
         } catch (error) {
             console.error('Error deleting conversation:', error);
         }
     };
 
-// Filter conversations by search
+    const handleBackToConversations = () => {
+        setShowMobileChat(false);
+    };
+
+    // Filter conversations by search
     const filteredConversations = conversations.filter(conv =>
         conv.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         conv.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         conv.last_message?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-// Format time
+    // Format time
     const formatTime = (timestamp) => {
         const date = new Date(timestamp);
         const now = new Date();
@@ -607,6 +333,7 @@ const Chat = () => {
         return date.toLocaleDateString();
     };
 
+    // Loading state
     if (loading) {
         return (
             <Flex align="center" justify="center" style={{ minHeight: '400px' }}>
@@ -620,384 +347,692 @@ const Chat = () => {
         );
     }
 
-    return (
-        <Box style={{ height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}>
-            {/* Header */}
-            <Flex align="center" justify="between" mb="4">
-                <Box>
-                    <Heading size="8" weight="bold" style={{ marginBottom: '8px' }}>
-                        Customer Chat
-                    </Heading>
-                    <Flex align="center" gap="3">
-                        {stats && (
-                            <>
-                                <Badge size="2" color="blue">
-                                    {stats.total_conversations} Conversations
-                                </Badge>
-                                <Badge size="2" color="red">
-                                    {stats.unread_messages} Unread
-                                </Badge>
-                                <Badge size="2" color="green">
-                                    {stats.today_messages} Today
-                                </Badge>
-                                {wsConnected && (
-                                    <Badge size="2" color="green">
-                                        🟢 Live
+    // Mobile Conversation Card Component
+    const ConversationCard = ({ conv, isSelected }) => (
+        <motion.div
+            whileHover={!isMobile ? { scale: 1.02 } : {}}
+            whileTap={{ scale: 0.98 }}
+        >
+            <Card
+                onClick={() => selectConversation(conv)}
+                style={{
+                    background: isSelected
+                        ? 'rgba(139, 92, 246, 0.1)'
+                        : 'rgba(255, 255, 255, 0.03)',
+                    border: isSelected
+                        ? '1px solid rgba(139, 92, 246, 0.3)'
+                        : '1px solid transparent',
+                    marginBottom: '8px',
+                    cursor: 'pointer',
+                    padding: isMobile ? '10px' : '12px',
+                    transition: 'all 0.2s'
+                }}
+            >
+                <Flex align="start" justify="between">
+                    <Flex align="center" gap={isMobile ? '2' : '3'}>
+                        <Avatar
+                            size={isMobile ? '2' : '3'}
+                            fallback={conv.username?.slice(0, 2).toUpperCase() || 'U'}
+                            style={{
+                                background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
+                            }}
+                        />
+                        <Box>
+                            <Flex align="center" gap="2">
+                                <Text size="2" weight="medium">
+                                    @{conv.username || `user${conv.telegram_id}`}
+                                </Text>
+                                {conv.unread_count > 0 && (
+                                    <Badge size="1" color="red">
+                                        {conv.unread_count}
                                     </Badge>
                                 )}
-                            </>
-                        )}
+                            </Flex>
+                            <Text size="1" style={{
+                                color: 'rgba(255, 255, 255, 0.5)',
+                                display: 'block',
+                                marginTop: '2px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                maxWidth: isMobile ? '160px' : '180px'
+                            }}>
+                                {conv.last_message || 'No messages'}
+                            </Text>
+                        </Box>
                     </Flex>
-                </Box>
 
-                <Button
-                    size="3"
-                    variant="surface"
-                    onClick={handleRefresh}
-                    disabled={refreshing}
-                    style={{
-                        background: refreshing
-                            ? 'rgba(139, 92, 246, 0.2)'
-                            : 'rgba(20, 20, 25, 0.6)',
-                        border: refreshing
-                            ? '1px solid rgba(139, 92, 246, 0.4)'
-                            : '1px solid rgba(255, 255, 255, 0.1)',
-                        cursor: refreshing ? 'wait' : 'pointer',
-                        transition: 'all 0.2s',
-                        transform: refreshing ? 'scale(0.98)' : 'scale(1)'
-                    }}
-                >
-                    <ReloadIcon width="18" height="18" style={{
-                        opacity: refreshing ? 0.7 : 1
-                    }} />
-                    {refreshing ? 'Refreshing...' : 'Refresh'}
-                </Button>
-            </Flex>
-
-            {/* Main Chat Container */}
-            <Card style={{
-                background: 'rgba(20, 20, 25, 0.6)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-                flex: 1,
-                padding: 0,
-                display: 'flex',
-                overflow: 'hidden'
-            }}>
-                <Flex style={{ height: '100%', width: '100%' }}>
-                    {/* Conversations Sidebar */}
-                    <Box style={{
-                        width: '320px',
-                        borderRight: '1px solid rgba(255, 255, 255, 0.05)',
-                        display: 'flex',
-                        flexDirection: 'column'
-                    }}>
-                        {/* Search */}
-                        <Box style={{ padding: '16px' }}>
-                            <TextField.Root
-                                placeholder="Search conversations..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                style={{ background: 'rgba(255, 255, 255, 0.03)' }}
-                            >
-                                <TextField.Slot>
-                                    <MagnifyingGlassIcon height="16" width="16" />
-                                </TextField.Slot>
-                            </TextField.Root>
-
-                            <Flex align="center" justify="between" mt="3">
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={unreadOnly}
-                                        onChange={(e) => {
-                                            setUnreadOnly(e.target.checked);
-                                            fetchConversations();
-                                        }}
-                                    />
-                                    <Text size="2">Unread only</Text>
-                                </label>
-                            </Flex>
-                        </Box>
-
-                        <Separator />
-
-                        {/* Conversations List */}
-                        <ScrollArea style={{ flex: 1 }}>
-                            <Box style={{ padding: '8px' }}>
-                                {filteredConversations.length === 0 ? (
-                                    <Text size="2" style={{
-                                        display: 'block',
-                                        textAlign: 'center',
-                                        padding: '20px',
-                                        color: 'rgba(255, 255, 255, 0.5)'
-                                    }}>
-                                        No conversations found
-                                    </Text>
-                                ) : (
-                                    filteredConversations.map((conv) => (
-                                        <motion.div
-                                            key={conv.telegram_id}
-                                            whileHover={{ scale: 1.02 }}
-                                            whileTap={{ scale: 0.98 }}
-                                        >
-                                            <Card
-                                                onClick={() => selectConversation(conv)}
-                                                style={{
-                                                    background: selectedConversation?.telegram_id === conv.telegram_id
-                                                        ? 'rgba(139, 92, 246, 0.1)'
-                                                        : 'rgba(255, 255, 255, 0.03)',
-                                                    border: selectedConversation?.telegram_id === conv.telegram_id
-                                                        ? '1px solid rgba(139, 92, 246, 0.3)'
-                                                        : '1px solid transparent',
-                                                    marginBottom: '8px',
-                                                    cursor: 'pointer',
-                                                    padding: '12px',
-                                                    transition: 'all 0.2s'
-                                                }}
-                                            >
-                                                <Flex align="start" justify="between">
-                                                    <Flex align="center" gap="3">
-                                                        <Avatar
-                                                            size="3"
-                                                            fallback={conv.username?.slice(0, 2).toUpperCase() || 'U'}
-                                                            style={{
-                                                                background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
-                                                            }}
-                                                        />
-                                                        <Box>
-                                                            <Flex align="center" gap="2">
-                                                                <Text size="2" weight="medium">
-                                                                    @{conv.username || `user${conv.telegram_id}`}
-                                                                </Text>
-                                                                {conv.unread_count > 0 && (
-                                                                    <Badge size="1" color="red">
-                                                                        {conv.unread_count}
-                                                                    </Badge>
-                                                                )}
-                                                            </Flex>
-                                                            <Text size="1" style={{
-                                                                color: 'rgba(255, 255, 255, 0.5)',
-                                                                display: 'block',
-                                                                marginTop: '2px',
-                                                                overflow: 'hidden',
-                                                                textOverflow: 'ellipsis',
-                                                                whiteSpace: 'nowrap',
-                                                                maxWidth: '180px'
-                                                            }}>
-                                                                {conv.last_message || 'No messages'}
-                                                            </Text>
-                                                        </Box>
-                                                    </Flex>
-
-                                                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
-                                                        {formatTime(conv.last_message_time)}
-                                                    </Text>
-                                                </Flex>
-                                            </Card>
-                                        </motion.div>
-                                    ))
-                                )}
-                            </Box>
-                        </ScrollArea>
-                    </Box>
-
-                    {/* Chat Area */}
-                    {selectedConversation ? (
-                        <Box style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                            {/* Chat Header */}
-                            <Flex align="center" justify="between" style={{
-                                padding: '16px',
-                                borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
-                            }}>
-                                <Flex align="center" gap="3">
-                                    <Avatar
-                                        size="3"
-                                        fallback={selectedConversation.username?.slice(0, 2).toUpperCase() || 'U'}
-                                        style={{
-                                            background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
-                                        }}
-                                    />
-                                    <Box>
-                                        <Text size="3" weight="medium">
-                                            @{selectedConversation.username}
-                                        </Text>
-                                        <Flex align="center" gap="2">
-                                            <Badge size="1" color="green">
-                                                ID: {selectedConversation.telegram_id}
-                                            </Badge>
-                                            {selectedConversation.total_orders > 0 && (
-                                                <Badge size="1" color="blue">
-                                                    {selectedConversation.total_orders} orders
-                                                </Badge>
-                                            )}
-                                            {selectedConversation.total_spent > 0 && (
-                                                <Badge size="1" color="purple">
-                                                    ${selectedConversation.total_spent}
-                                                </Badge>
-                                            )}
-                                        </Flex>
-                                    </Box>
-                                </Flex>
-
-                                <DropdownMenu.Root>
-                                    <DropdownMenu.Trigger>
-                                        <IconButton size="2" variant="ghost">
-                                            <DotsHorizontalIcon width="16" height="16" />
-                                        </IconButton>
-                                    </DropdownMenu.Trigger>
-                                    <DropdownMenu.Content>
-                                        <DropdownMenu.Item>
-                                            <PersonIcon width="14" height="14" />
-                                            View Profile
-                                        </DropdownMenu.Item>
-                                        <DropdownMenu.Item>
-                                            <StarIcon width="14" height="14" />
-                                            Mark Important
-                                        </DropdownMenu.Item>
-                                        <DropdownMenu.Separator />
-                                        <DropdownMenu.Item
-                                            color="red"
-                                            onClick={() => deleteConversation(selectedConversation.telegram_id)}
-                                        >
-                                            <TrashIcon width="14" height="14" />
-                                            Delete Conversation
-                                        </DropdownMenu.Item>
-                                    </DropdownMenu.Content>
-                                </DropdownMenu.Root>
-                            </Flex>
-
-                            {/* Messages Area */}
-                            <ScrollArea style={{ flex: 1, padding: '16px' }}>
-                                <Box>
-                                    {messages.map((msg, idx) => (
-                                        <motion.div
-                                            key={msg._id || idx}
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: idx * 0.01 }}
-                                        >
-                                            <Flex
-                                                justify={msg.direction === 'outgoing' ? 'end' : 'start'}
-                                                style={{ marginBottom: '12px' }}
-                                            >
-                                                <Box
-                                                    style={{
-                                                        maxWidth: '70%',
-                                                        padding: '10px 14px',
-                                                        borderRadius: '12px',
-                                                        background: msg.direction === 'outgoing'
-                                                            ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'
-                                                            : 'rgba(255, 255, 255, 0.1)',
-                                                        color: '#fff'
-                                                    }}
-                                                >
-                                                    <Text size="2" style={{ wordBreak: 'break-word' }}>
-                                                        {msg.message}
-                                                    </Text>
-                                                    <Flex align="center" gap="1" mt="1">
-                                                        <Text size="1" style={{
-                                                            color: msg.direction === 'outgoing'
-                                                                ? 'rgba(255, 255, 255, 0.7)'
-                                                                : 'rgba(255, 255, 255, 0.5)'
-                                                        }}>
-                                                            {formatTime(msg.timestamp)}
-                                                        </Text>
-                                                        {msg.direction === 'outgoing' && msg.read && (
-                                                            <CheckIcon width="12" height="12" style={{ color: '#10b981' }} />
-                                                        )}
-                                                    </Flex>
-                                                </Box>
-                                            </Flex>
-                                        </motion.div>
-                                    ))}
-                                    <div ref={messagesEndRef} />
-                                </Box>
-                            </ScrollArea>
-
-                            {/* Quick Replies */}
-                            {quickReplies.length > 0 && (
-                                <Box style={{ padding: '8px 16px' }}>
-                                    <ScrollArea>
-                                        <Flex gap="2" style={{ paddingBottom: '8px' }}>
-                                            {quickReplies.map((reply, idx) => (
-                                                <Button
-                                                    key={idx}
-                                                    size="1"
-                                                    variant="soft"
-                                                    onClick={() => setMessageInput(reply.message)}
-                                                    style={{ flexShrink: 0 }}
-                                                >
-                                                    {reply.title}
-                                                </Button>
-                                            ))}
-                                        </Flex>
-                                    </ScrollArea>
-                                </Box>
-                            )}
-
-                            {/* Message Input */}
-                            <Box style={{
-                                padding: '16px',
-                                borderTop: '1px solid rgba(255, 255, 255, 0.05)'
-                            }}>
-                                <Flex gap="3">
-                                    <TextArea
-                                        placeholder="Type a message..."
-                                        value={messageInput}
-                                        onChange={(e) => {
-                                            setMessageInput(e.target.value);
-                                            handleTyping();
-                                        }}
-                                        onKeyPress={(e) => {
-                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                e.preventDefault();
-                                                sendMessage();
-                                            }
-                                        }}
-                                        style={{
-                                            flex: 1,
-                                            background: 'rgba(255, 255, 255, 0.03)',
-                                            minHeight: '40px',
-                                            maxHeight: '120px'
-                                        }}
-                                    />
-
-                                    <Button
-                                        onClick={sendMessage}
-                                        disabled={!messageInput.trim() || sending}
-                                        style={{
-                                            background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-                                            cursor: !messageInput.trim() || sending ? 'not-allowed' : 'pointer',
-                                            opacity: !messageInput.trim() || sending ? 0.5 : 1
-                                        }}
-                                    >
-                                        <PaperPlaneIcon width="16" height="16" />
-                                        Send
-                                    </Button>
-                                </Flex>
-                            </Box>
-                        </Box>
-                    ) : (
-                        // No conversation selected
-                        <Flex align="center" justify="center" style={{ flex: 1 }}>
-                            <Box style={{ textAlign: 'center' }}>
-                                <ChatBubbleIcon
-                                    width="64"
-                                    height="64"
-                                    style={{
-                                        color: 'rgba(139, 92, 246, 0.3)',
-                                        marginBottom: '16px'
-                                    }}
-                                />
-                                <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                                    Select a conversation to start chatting
-                                </Text>
-                            </Box>
-                        </Flex>
-                    )}
+                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
+                        {formatTime(conv.last_message_time)}
+                    </Text>
                 </Flex>
             </Card>
+        </motion.div>
+    );
+
+    // Mobile Chat View
+    if (isMobile && showMobileChat && selectedConversation) {
+        return (
+            <Box style={{ 
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: '100vh',
+                display: 'flex', 
+                flexDirection: 'column',
+                background: 'linear-gradient(180deg, #0a0a0b 0%, #1a1a1b 100%)',
+                zIndex: 1000
+            }}>
+                {/* Mobile Chat Header */}
+                <Card style={{
+                    background: 'rgba(20, 20, 25, 0.95)',
+                    backdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(255, 255, 255, 0.05)',
+                    borderRadius: 0,
+                    padding: '12px',
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 10
+                }}>
+                    <Flex align="center" justify="between">
+                        <Flex align="center" gap="3">
+                            <IconButton
+                                size="2"
+                                variant="ghost"
+                                onClick={handleBackToConversations}
+                            >
+                                <ArrowLeftIcon width="18" height="18" />
+                            </IconButton>
+                            <Avatar
+                                size="2"
+                                fallback={selectedConversation.username?.slice(0, 2).toUpperCase() || 'U'}
+                                style={{
+                                    background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
+                                }}
+                            />
+                            <Box>
+                                <Text size="2" weight="medium">
+                                    @{selectedConversation.username || `user${selectedConversation.telegram_id}`}
+                                </Text>
+                                <Flex align="center" gap="2">
+                                    <Badge size="1" color="green">
+                                        ID: {selectedConversation.telegram_id}
+                                    </Badge>
+                                </Flex>
+                            </Box>
+                        </Flex>
+
+                        <DropdownMenu.Root>
+                            <DropdownMenu.Trigger>
+                                <IconButton size="2" variant="ghost">
+                                    <DotsHorizontalIcon width="16" height="16" />
+                                </IconButton>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Content>
+                                <DropdownMenu.Item
+                                    color="red"
+                                    onClick={() => deleteConversation(selectedConversation.telegram_id)}
+                                >
+                                    <TrashIcon width="14" height="14" />
+                                    Delete Chat
+                                </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                        </DropdownMenu.Root>
+                    </Flex>
+                </Card>
+
+                {/* Messages Area */}
+                <Box style={{ 
+                    flex: 1, 
+                    overflowY: 'auto',
+                    padding: '12px',
+                    WebkitOverflowScrolling: 'touch'
+                }}>
+                    {messages.map((msg, idx) => (
+                        <motion.div
+                            key={msg._id || idx}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                        >
+                            <Flex
+                                justify={msg.direction === 'outgoing' ? 'end' : 'start'}
+                                style={{ marginBottom: '8px' }}
+                            >
+                                <Box
+                                    style={{
+                                        maxWidth: '80%',
+                                        padding: '8px 12px',
+                                        borderRadius: '12px',
+                                        background: msg.direction === 'outgoing'
+                                            ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'
+                                            : 'rgba(255, 255, 255, 0.1)',
+                                        color: '#fff'
+                                    }}
+                                >
+                                    <Text size="2" style={{ wordBreak: 'break-word' }}>
+                                        {msg.message}
+                                    </Text>
+                                    <Flex align="center" gap="1" mt="1">
+                                        <Text size="1" style={{
+                                            color: msg.direction === 'outgoing'
+                                                ? 'rgba(255, 255, 255, 0.7)'
+                                                : 'rgba(255, 255, 255, 0.5)'
+                                        }}>
+                                            {formatTime(msg.timestamp)}
+                                        </Text>
+                                        {msg.direction === 'outgoing' && msg.read && (
+                                            <CheckCircledIcon width="12" height="12" style={{ color: '#10b981' }} />
+                                        )}
+                                    </Flex>
+                                </Box>
+                            </Flex>
+                        </motion.div>
+                    ))}
+                    <div ref={messagesEndRef} />
+                </Box>
+
+                {/* Quick Replies - Mobile */}
+                {quickReplies.length > 0 && (
+                    <Box style={{ 
+                        padding: '8px',
+                        borderTop: '1px solid rgba(255, 255, 255, 0.05)'
+                    }}>
+                        <ScrollArea>
+                            <Flex gap="2" style={{ paddingBottom: '4px' }}>
+                                {quickReplies.map((reply, idx) => (
+                                    <Button
+                                        key={idx}
+                                        size="1"
+                                        variant="soft"
+                                        onClick={() => setMessageInput(reply.message)}
+                                        style={{ flexShrink: 0, fontSize: '12px' }}
+                                    >
+                                        {reply.title}
+                                    </Button>
+                                ))}
+                            </Flex>
+                        </ScrollArea>
+                    </Box>
+                )}
+
+                {/* Message Input - Mobile */}
+                <Box style={{
+                    padding: '12px',
+                    paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                    background: 'rgba(20, 20, 25, 0.95)',
+                    backdropFilter: 'blur(20px)'
+                }}>
+                    <Flex gap="2">
+                        <TextField.Root
+                            placeholder="Type a message..."
+                            value={messageInput}
+                            onChange={(e) => {
+                                setMessageInput(e.target.value);
+                                handleTyping();
+                            }}
+                            onKeyPress={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    sendMessage();
+                                }
+                            }}
+                            style={{
+                                flex: 1,
+                                background: 'rgba(255, 255, 255, 0.05)'
+                            }}
+                        />
+
+                        <IconButton
+                            size="3"
+                            onClick={sendMessage}
+                            disabled={!messageInput.trim() || sending}
+                            style={{
+                                background: messageInput.trim() && !sending
+                                    ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'
+                                    : 'rgba(255, 255, 255, 0.1)',
+                                cursor: !messageInput.trim() || sending ? 'not-allowed' : 'pointer'
+                            }}
+                        >
+                            <PaperPlaneIcon width="16" height="16" />
+                        </IconButton>
+                    </Flex>
+                </Box>
+            </Box>
+        );
+    }
+
+    // Desktop Layout OR Mobile Conversations List
+    return (
+        <Box style={{ 
+            position: isMobile ? 'fixed' : 'relative',
+            top: isMobile ? 0 : 'auto',
+            left: isMobile ? 0 : 'auto',
+            right: isMobile ? 0 : 'auto',
+            bottom: isMobile ? 0 : 'auto',
+            height: isMobile ? '100vh' : 'calc(100vh - 140px)',
+            display: 'flex', 
+            flexDirection: 'column',
+            overflow: 'hidden',
+            background: isMobile ? 'linear-gradient(180deg, #0a0a0b 0%, #1a1a1b 100%)' : 'transparent',
+            paddingTop: isMobile ? '56px' : 0,
+            paddingBottom: isMobile ? '65px' : 0
+        }}>
+            {/* Header */}
+            <Box style={{
+                padding: isMobile ? '12px 16px' : '0 0 16px 0',
+                background: isMobile ? 'rgba(20, 20, 25, 0.95)' : 'transparent',
+                backdropFilter: isMobile ? 'blur(20px)' : 'none',
+                borderBottom: isMobile ? '1px solid rgba(255, 255, 255, 0.05)' : 'none'
+            }}>
+                <Flex 
+                    align={isMobile ? 'start' : 'center'} 
+                    justify="between" 
+                    direction={isMobile ? 'column' : 'row'}
+                    gap={isMobile ? '2' : '0'}
+                >
+                    <Box>
+                        <Heading size={isMobile ? '6' : '8'} weight="bold" style={{ marginBottom: '8px' }}>
+                            Customer Chat
+                        </Heading>
+                        <Flex align="center" gap={isMobile ? '2' : '3'} wrap="wrap">
+                            {stats && (
+                                <>
+                                    <Badge size={isMobile ? '1' : '2'} color="blue">
+                                        {stats.total_conversations} Chats
+                                    </Badge>
+                                    <Badge size={isMobile ? '1' : '2'} color="red">
+                                        {stats.unread_messages} Unread
+                                    </Badge>
+                                    <Badge size={isMobile ? '1' : '2'} color="green">
+                                        {stats.today_messages} Today
+                                    </Badge>
+                                </>
+                            )}
+                        </Flex>
+                    </Box>
+
+                    <Button
+                        size={isMobile ? '2' : '3'}
+                        variant="surface"
+                        onClick={handleRefresh}
+                        disabled={refreshing}
+                        style={{
+                            background: 'rgba(20, 20, 25, 0.6)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            width: isMobile ? '100%' : 'auto'
+                        }}
+                    >
+                        <motion.div
+                            animate={refreshing ? { rotate: 360 } : {}}
+                            transition={{ duration: 1, repeat: refreshing ? Infinity : 0, ease: "linear" }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                        >
+                            <ReloadIcon width={isMobile ? '16' : '18'} height={isMobile ? '16' : '18'} />
+                            {refreshing ? 'Refreshing...' : 'Refresh'}
+                        </motion.div>
+                    </Button>
+                </Flex>
+            </Box>
+
+            {/* Main Container */}
+            {isMobile ? (
+                // Mobile Layout - Conversations List
+                <Box style={{ 
+                    flex: 1, 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                }}>
+                    {/* Search and Filter */}
+                    <Card style={{
+                        background: 'rgba(20, 20, 25, 0.6)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.05)',
+                        padding: '12px',
+                        marginBottom: '12px',
+                        marginLeft: '12px',
+                        marginRight: '12px'
+                    }}>
+                        <TextField.Root
+                            placeholder="Search conversations..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            style={{ 
+                                background: 'rgba(255, 255, 255, 0.03)',
+                                marginBottom: '8px'
+                            }}
+                        >
+                            <TextField.Slot>
+                                <MagnifyingGlassIcon height="14" width="14" />
+                            </TextField.Slot>
+                        </TextField.Root>
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={unreadOnly}
+                                onChange={(e) => {
+                                    setUnreadOnly(e.target.checked);
+                                    fetchConversations();
+                                }}
+                            />
+                            <Text size="2">Show unread only</Text>
+                        </label>
+                    </Card>
+
+                    {/* Conversations List */}
+                    <Box style={{ 
+                        flex: 1, 
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        WebkitOverflowScrolling: 'touch',
+                        padding: '0 12px'
+                    }}>
+                        {filteredConversations.length === 0 ? (
+                            <Card style={{
+                                background: 'rgba(20, 20, 25, 0.6)',
+                                backdropFilter: 'blur(20px)',
+                                border: '1px solid rgba(255, 255, 255, 0.05)',
+                                padding: '40px 20px',
+                                textAlign: 'center'
+                            }}>
+                                <ChatBubbleIcon
+                                    width="48"
+                                    height="48"
+                                    style={{
+                                        color: 'rgba(139, 92, 246, 0.3)',
+                                        margin: '0 auto 16px'
+                                    }}
+                                />
+                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                    No conversations found
+                                </Text>
+                            </Card>
+                        ) : (
+                            filteredConversations.map(conv => (
+                                <ConversationCard
+                                    key={conv.telegram_id}
+                                    conv={conv}
+                                    isSelected={selectedConversation?.telegram_id === conv.telegram_id}
+                                />
+                            ))
+                        )}
+                    </Box>
+                </Box>
+            ) : (
+                // Desktop Layout
+                <Card style={{
+                    background: 'rgba(20, 20, 25, 0.6)',
+                    backdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(255, 255, 255, 0.05)',
+                    flex: 1,
+                    padding: 0,
+                    display: 'flex',
+                    overflow: 'hidden'
+                }}>
+                    <Flex style={{ height: '100%', width: '100%' }}>
+                        {/* Conversations Sidebar - Desktop */}
+                        <Box style={{
+                            width: '320px',
+                            borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+                            display: 'flex',
+                            flexDirection: 'column'
+                        }}>
+                            {/* Search */}
+                            <Box style={{ padding: '16px' }}>
+                                <TextField.Root
+                                    placeholder="Search conversations..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    style={{ background: 'rgba(255, 255, 255, 0.03)' }}
+                                >
+                                    <TextField.Slot>
+                                        <MagnifyingGlassIcon height="16" width="16" />
+                                    </TextField.Slot>
+                                </TextField.Root>
+
+                                <Flex align="center" justify="between" mt="3">
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={unreadOnly}
+                                            onChange={(e) => {
+                                                setUnreadOnly(e.target.checked);
+                                                fetchConversations();
+                                            }}
+                                        />
+                                        <Text size="2">Unread only</Text>
+                                    </label>
+                                </Flex>
+                            </Box>
+
+                            <Separator />
+
+                            {/* Conversations List */}
+                            <ScrollArea style={{ flex: 1 }}>
+                                <Box style={{ padding: '8px' }}>
+                                    {filteredConversations.length === 0 ? (
+                                        <Text size="2" style={{
+                                            display: 'block',
+                                            textAlign: 'center',
+                                            padding: '20px',
+                                            color: 'rgba(255, 255, 255, 0.5)'
+                                        }}>
+                                            No conversations found
+                                        </Text>
+                                    ) : (
+                                        filteredConversations.map(conv => (
+                                            <ConversationCard
+                                                key={conv.telegram_id}
+                                                conv={conv}
+                                                isSelected={selectedConversation?.telegram_id === conv.telegram_id}
+                                            />
+                                        ))
+                                    )}
+                                </Box>
+                            </ScrollArea>
+                        </Box>
+
+                        {/* Chat Area - Desktop */}
+                        {selectedConversation ? (
+                            <Box style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                                {/* Chat Header */}
+                                <Flex align="center" justify="between" style={{
+                                    padding: '16px',
+                                    borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
+                                }}>
+                                    <Flex align="center" gap="3">
+                                        <Avatar
+                                            size="3"
+                                            fallback={selectedConversation.username?.slice(0, 2).toUpperCase() || 'U'}
+                                            style={{
+                                                background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
+                                            }}
+                                        />
+                                        <Box>
+                                            <Text size="3" weight="medium">
+                                                @{selectedConversation.username || `user${selectedConversation.telegram_id}`}
+                                            </Text>
+                                            <Flex align="center" gap="2">
+                                                <Badge size="1" color="green">
+                                                    ID: {selectedConversation.telegram_id}
+                                                </Badge>
+                                                {selectedConversation.total_orders > 0 && (
+                                                    <Badge size="1" color="blue">
+                                                        {selectedConversation.total_orders} orders
+                                                    </Badge>
+                                                )}
+                                                {selectedConversation.total_spent > 0 && (
+                                                    <Badge size="1" color="purple">
+                                                        ${selectedConversation.total_spent}
+                                                    </Badge>
+                                                )}
+                                            </Flex>
+                                        </Box>
+                                    </Flex>
+
+                                    <DropdownMenu.Root>
+                                        <DropdownMenu.Trigger>
+                                            <IconButton size="2" variant="ghost">
+                                                <DotsHorizontalIcon width="16" height="16" />
+                                            </IconButton>
+                                        </DropdownMenu.Trigger>
+                                        <DropdownMenu.Content>
+                                            <DropdownMenu.Item>
+                                                <PersonIcon width="14" height="14" />
+                                                View Profile
+                                            </DropdownMenu.Item>
+                                            <DropdownMenu.Item>
+                                                <StarIcon width="14" height="14" />
+                                                Mark Important
+                                            </DropdownMenu.Item>
+                                            <DropdownMenu.Separator />
+                                            <DropdownMenu.Item
+                                                color="red"
+                                                onClick={() => deleteConversation(selectedConversation.telegram_id)}
+                                            >
+                                                <TrashIcon width="14" height="14" />
+                                                Delete Conversation
+                                            </DropdownMenu.Item>
+                                        </DropdownMenu.Content>
+                                    </DropdownMenu.Root>
+                                </Flex>
+
+                                {/* Messages Area */}
+                                <ScrollArea style={{ flex: 1, padding: '16px' }}>
+                                    <Box>
+                                        {messages.map((msg, idx) => (
+                                            <motion.div
+                                                key={msg._id || idx}
+                                                initial={{ opacity: 0, y: 10 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ delay: idx * 0.01 }}
+                                            >
+                                                <Flex
+                                                    justify={msg.direction === 'outgoing' ? 'end' : 'start'}
+                                                    style={{ marginBottom: '12px' }}
+                                                >
+                                                    <Box
+                                                        style={{
+                                                            maxWidth: '70%',
+                                                            padding: '10px 14px',
+                                                            borderRadius: '12px',
+                                                            background: msg.direction === 'outgoing'
+                                                                ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'
+                                                                : 'rgba(255, 255, 255, 0.1)',
+                                                            color: '#fff'
+                                                        }}
+                                                    >
+                                                        <Text size="2" style={{ wordBreak: 'break-word' }}>
+                                                            {msg.message}
+                                                        </Text>
+                                                        <Flex align="center" gap="1" mt="1">
+                                                            <Text size="1" style={{
+                                                                color: msg.direction === 'outgoing'
+                                                                    ? 'rgba(255, 255, 255, 0.7)'
+                                                                    : 'rgba(255, 255, 255, 0.5)'
+                                                            }}>
+                                                                {formatTime(msg.timestamp)}
+                                                            </Text>
+                                                            {msg.direction === 'outgoing' && msg.read && (
+                                                                <CheckCircledIcon width="12" height="12" style={{ color: '#10b981' }} />
+                                                            )}
+                                                        </Flex>
+                                                    </Box>
+                                                </Flex>
+                                            </motion.div>
+                                        ))}
+                                        <div ref={messagesEndRef} />
+                                    </Box>
+                                </ScrollArea>
+
+                                {/* Quick Replies */}
+                                {quickReplies.length > 0 && (
+                                    <Box style={{ padding: '8px 16px' }}>
+                                        <ScrollArea>
+                                            <Flex gap="2" style={{ paddingBottom: '8px' }}>
+                                                {quickReplies.map((reply, idx) => (
+                                                    <Button
+                                                        key={idx}
+                                                        size="1"
+                                                        variant="soft"
+                                                        onClick={() => setMessageInput(reply.message)}
+                                                        style={{ flexShrink: 0 }}
+                                                    >
+                                                        {reply.title}
+                                                    </Button>
+                                                ))}
+                                            </Flex>
+                                        </ScrollArea>
+                                    </Box>
+                                )}
+
+                                {/* Message Input */}
+                                <Box style={{
+                                    padding: '16px',
+                                    borderTop: '1px solid rgba(255, 255, 255, 0.05)'
+                                }}>
+                                    <Flex gap="3">
+                                        <TextArea
+                                            placeholder="Type a message..."
+                                            value={messageInput}
+                                            onChange={(e) => {
+                                                setMessageInput(e.target.value);
+                                                handleTyping();
+                                            }}
+                                            onKeyPress={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    sendMessage();
+                                                }
+                                            }}
+                                            style={{
+                                                flex: 1,
+                                                background: 'rgba(255, 255, 255, 0.03)',
+                                                minHeight: '40px',
+                                                maxHeight: '120px'
+                                            }}
+                                        />
+
+                                        <Button
+                                            onClick={sendMessage}
+                                            disabled={!messageInput.trim() || sending}
+                                            style={{
+                                                background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                                                cursor: !messageInput.trim() || sending ? 'not-allowed' : 'pointer',
+                                                opacity: !messageInput.trim() || sending ? 0.5 : 1
+                                            }}
+                                        >
+                                            <PaperPlaneIcon width="16" height="16" />
+                                            Send
+                                        </Button>
+                                    </Flex>
+                                </Box>
+                            </Box>
+                        ) : (
+                            // No conversation selected - Desktop
+                            <Flex align="center" justify="center" style={{ flex: 1 }}>
+                                <Box style={{ textAlign: 'center' }}>
+                                    <ChatBubbleIcon
+                                        width="64"
+                                        height="64"
+                                        style={{
+                                            color: 'rgba(139, 92, 246, 0.3)',
+                                            marginBottom: '16px'
+                                        }}
+                                    />
+                                    <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                        Select a conversation to start chatting
+                                    </Text>
+                                </Box>
+                            </Flex>
+                        )}
+                    </Flex>
+                </Card>
+            )}
         </Box>
     );
 };
