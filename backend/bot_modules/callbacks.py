@@ -343,48 +343,80 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     order_id = await create_order(order_data)
     order = await get_order_by_id(order_id)
     
-    # Try to import payment gateway
-    payment_gateway = None
-    try:
-        import sys
-        import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from nowpayments_gateway import payment_gateway as pg
-        payment_gateway = pg
-    except ImportError as e:
-        logger.warning(f"NOWPayments gateway not available: {e}")
+    # Try to create REAL payment with NOWPayments
+    payment_created = False
     
-    if payment_gateway:
-        # Create REAL payment with NOWPayments
-        payment_request = {
-            "order_id": str(order_id),
-            "order_number": order['order_number'],
-            "amount_usd": total,
-            "currency": payment_method,
-            "telegram_id": user_id,
-            "description": f"AnabolicPizza Order {order['order_number']}"
-        }
+    try:
+        # FORCE RELOAD environment
+        import os
+        import sys
+        from pathlib import Path
         
-        payment_result = await payment_gateway.create_payment(payment_request)
+        # Načítaj .env priamo zo súboru
+        env_path = Path('/opt/telegram-shop-bot/.env')
+        if env_path.exists():
+            with open(env_path) as f:
+                for line in f:
+                    if line.strip() and not line.startswith('#'):
+                        key, value = line.strip().split('=', 1)
+                        os.environ[key] = value
         
-        if payment_result.get("success"):
-            # Update order with payment details
-            await update_order_payment_details(order_id, {
-                "payment_id": payment_result["payment_id"],
-                "pay_address": payment_result["pay_address"],
-                "pay_amount": payment_result["pay_amount"],
-                "pay_currency": payment_result["pay_currency"]
-            })
+        api_key = os.environ.get("NOWPAYMENTS_API_KEY")
+        
+        if api_key and api_key not in ["", "demo_key_123456", "demo_mode"]:
+            logger.info(f"Creating real payment for order {order['order_number']}")
+            logger.info(f"API Key found: {api_key[:10]}...")
             
-            # Clear cart
-            cart_manager.clear_cart(user_id)
+            # Import NOWPayments gateway class
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from nowpayments_gateway import NOWPaymentsGateway
             
-            # Apply referral code if used
-            if referral_code:
-                await apply_referral_code(referral_code)
+            # Create fresh gateway instance
+            payment_gateway = NOWPaymentsGateway(
+                api_key=api_key,
+                ipn_secret=os.environ.get("NOWPAYMENTS_IPN_SECRET", ""),
+                sandbox=os.environ.get("NOWPAYMENTS_SANDBOX", "false").lower() == "true"
+            )
             
-            # Format payment instructions
-            payment_text = f"""
+            logger.info(f"Gateway created, sandbox={payment_gateway.sandbox}")
+            
+            # Create payment request
+            payment_request = {
+                "order_id": str(order_id),
+                "order_number": order['order_number'],
+                "amount_usd": float(total),
+                "currency": payment_method,
+                "telegram_id": user_id,
+                "description": "Enjoy"
+            }
+            
+            logger.info(f"Sending payment request: {payment_request}")
+            
+            # Create payment
+            payment_result = await payment_gateway.create_payment(payment_request)
+            
+            logger.info(f"Payment result: {payment_result}")
+            
+            if payment_result.get("success"):
+                payment_created = True
+                
+                # Update order with payment details
+                await update_order_payment_details(order_id, {
+                    "payment_id": payment_result["payment_id"],
+                    "pay_address": payment_result["pay_address"],
+                    "pay_amount": payment_result["pay_amount"],
+                    "pay_currency": payment_result["pay_currency"]
+                })
+                
+                # Clear cart
+                cart_manager.clear_cart(user_id)
+                
+                # Apply referral code if used
+                if referral_code:
+                    await apply_referral_code(referral_code)
+                
+                # Format payment instructions
+                payment_text = f"""
 💰 *PAYMENT INSTRUCTIONS*
 
 Order: `{order['order_number']}`
@@ -393,7 +425,7 @@ Amount: **${total:.2f}**
 ━━━━━━━━━━━━━━━━━━━━━
 
 📍 *Send EXACTLY this amount:*
-**{payment_result['pay_amount']:.8f} {payment_result['pay_currency']}**
+**{payment_result['pay_amount']:.8f} {payment_result['pay_currency'].upper()}**
 
 📬 *To this address:*
 `{payment_result['pay_address']}`
@@ -403,51 +435,47 @@ Amount: **${total:.2f}**
 ⏱️ *Payment expires in 20 minutes*
 
 ⚠️ **IMPORTANT:**
-• Send the EXACT amount shown
-• Payment will be confirmed automatically
-• DO NOT close this chat until confirmed
+- Send the EXACT amount shown
+- Payment will be confirmed automatically
+- DO NOT close this chat until confirmed
 
 🔄 *Status:* Waiting for payment...
 """
-            
-            # Create keyboard with payment status check
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_result['payment_id']}")],
-                [InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_order")],
-                [InlineKeyboardButton("❓ Need Help?", callback_data="payment_help")]
-            ])
-            
-            await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
-            
-            # Start background task to check payment status
-            asyncio.create_task(
-                auto_check_payment_status(
-                    context.bot,
-                    user_id,
-                    payment_result['payment_id'],
-                    order['order_number']
+                
+                # Create keyboard with payment status check
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_result['payment_id']}")],
+                    [InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_order")],
+                    [InlineKeyboardButton("❓ Need Help?", callback_data="payment_help")]
+                ])
+                
+                await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
+                
+                # Start background task to check payment status
+                asyncio.create_task(
+                    auto_check_payment_status(
+                        context.bot,
+                        user_id,
+                        payment_result['payment_id'],
+                        order['order_number']
+                    )
                 )
-            )
-            
+                return
+                
+            else:
+                logger.error(f"Payment creation failed: {payment_result.get('error', 'Unknown error')}")
+                
         else:
-            # Payment creation failed
-            error_text = f"""
-❌ *Payment Creation Failed*
-
-{payment_result.get('error', 'Unknown error')}
-
-Please try again or contact support.
-"""
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try Again", callback_data="checkout_start")],
-                [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
-            ])
+            logger.info("No valid API key found, using demo mode")
             
-            await query.edit_message_text(error_text, reply_markup=keyboard, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Failed to create NOWPayments payment: {e}")
+        import traceback
+        traceback.print_exc()
     
-    else:
-        # Fallback to demo mode if gateway not configured
+    # If we get here, use DEMO mode
+    if not payment_created:
+        logger.info(f"Falling back to demo mode for order {order['order_number']}")
         await handle_demo_payment(update, context, payment_method, order, order_id, total)
 
 async def handle_demo_payment(update, context, payment_method, order, order_id, total):

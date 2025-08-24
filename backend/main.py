@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
         # Initialize NOWPayments gateway
         api_key = os.getenv("NOWPAYMENTS_API_KEY")
         ipn_secret = os.getenv("NOWPAYMENTS_IPN_SECRET")
-        sandbox = os.getenv("NOWPAYMENTS_SANDBOX", "false").lower() == "true"
+        sandbox = os.getenv("NOWPAYMENTS_SANDBOX", "true").lower() == "true"
         
         if api_key:
             # Import and initialize here to avoid circular imports

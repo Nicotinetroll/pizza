@@ -284,3 +284,16 @@ async def get_user_stats(telegram_id: int) -> dict:
         "is_vip": user.get("is_vip", False),
         "vip_discount": user.get("vip_discount_percentage", 0)
     }
+
+async def update_order_payment_info(order_id: str, payment_info: dict):
+    """Update order with payment information"""
+    try:
+        from bson import ObjectId
+        await db.orders.update_one(
+            {"_id": ObjectId(order_id)},
+            {"$set": {"payment": payment_info}}
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error updating payment info: {e}")
+        return False
