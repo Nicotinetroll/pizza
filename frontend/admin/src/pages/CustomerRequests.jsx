@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Box, Flex, Grid, Text, Card, Badge, Button, Select,
-  Table, IconButton, Heading, TextField, Dialog, Checkbox,
-  ScrollArea, Code, DropdownMenu
+  Table, IconButton, Heading, Dialog, Checkbox,
+  Code, DropdownMenu
 } from '@radix-ui/themes';
 import {
   MagnifyingGlassIcon, ReloadIcon, TrashIcon, CheckIcon,
-  Cross2Icon, ClockIcon, DotsHorizontalIcon, PersonIcon,
-  CalendarIcon, ExclamationTriangleIcon, ChevronDownIcon
+  ClockIcon, DotsHorizontalIcon, PersonIcon,
+  ExclamationTriangleIcon, ChevronDownIcon,
+  ChevronLeftIcon, ChevronRightIcon, DoubleArrowLeftIcon,
+  DoubleArrowRightIcon
 } from '@radix-ui/react-icons';
 import { customOrdersAPI } from '../services/api';
 
@@ -18,6 +20,8 @@ const statusConfig = {
   completed: { color: 'green', icon: CheckIcon, label: 'Completed' }
 };
 
+const ITEMS_PER_PAGE = 10;
+
 const CustomerRequests = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +30,7 @@ const CustomerRequests = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedOrders, setSelectedOrders] = useState(new Set());
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
@@ -57,6 +62,7 @@ const CustomerRequests = () => {
   const handleRefresh = () => {
     setRefreshing(true);
     setSelectedOrders(new Set());
+    setCurrentPage(1);
     fetchOrders();
   };
 
@@ -102,10 +108,10 @@ const CustomerRequests = () => {
   };
 
   const toggleSelectAll = () => {
-    if (selectedOrders.size === filteredOrders.length) {
+    if (selectedOrders.size === paginatedOrders.length) {
       setSelectedOrders(new Set());
     } else {
-      setSelectedOrders(new Set(filteredOrders.map(o => o._id)));
+      setSelectedOrders(new Set(paginatedOrders.map(o => o._id)));
     }
   };
 
@@ -113,18 +119,61 @@ const CustomerRequests = () => {
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch = 
       order.custom_id?.toString().includes(searchTerm) ||
-      order.username?.toLowerCase().includes(searchLower) ||
+      order.first_name?.toLowerCase().includes(searchLower) ||
+      order.last_name?.toLowerCase().includes(searchLower) ||
       order.product_text?.toLowerCase().includes(searchLower) ||
       order.telegram_id?.toString().includes(searchTerm);
     const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
   const stats = {
     total: orders.length,
     pending: orders.filter(o => o.status === 'pending').length,
     processing: orders.filter(o => o.status === 'processing').length,
     completed: orders.filter(o => o.status === 'completed').length
+  };
+
+  const getDisplayName = (order) => {
+    // For group messages, the actual user info should be in first_name/last_name
+    // even if username is GroupAnonymousBot
+    if (order.first_name || order.last_name) {
+      const fullName = `${order.first_name || ''} ${order.last_name || ''}`.trim();
+      return fullName || `User${order.telegram_id}`;
+    }
+    // If no name, show telegram_id
+    return `User${order.telegram_id}`;
+  };
+
+  const getActualUsername = (order) => {
+    // Check if there's a real_username or original_username field
+    if (order.real_username || order.original_username) {
+      return `@${order.real_username || order.original_username}`;
+    }
+    // If username is GroupAnonymousBot, don't show it
+    if (order.username && order.username !== 'GroupAnonymousBot') {
+      return `@${order.username}`;
+    }
+    return '';
+  };
+
+  // Function to get customer type
+  const getCustomerType = (order) => {
+    if (order.username === 'GroupAnonymousBot' || order.is_group_message) {
+      return 'Group';
+    }
+    return 'Direct';
   };
 
   if (loading) {
@@ -196,7 +245,7 @@ const CustomerRequests = () => {
       >
         {Object.entries(stats).map(([key, value]) => {
           const config = key === 'total' ? 
-            { color: '#8b5cf6', label: 'Total', icon: ExclamationTriangleIcon } :
+            { color: '#8b5cf6', label: 'Total Requests', icon: ExclamationTriangleIcon } :
             statusConfig[key];
           
           return (
@@ -207,33 +256,47 @@ const CustomerRequests = () => {
               whileHover={!isMobile ? { y: -2 } : {}}
             >
               <Card style={{
-                background: 'rgba(20, 20, 25, 0.6)',
+                background: 'linear-gradient(135deg, rgba(20, 20, 25, 0.6) 0%, rgba(30, 30, 35, 0.6) 100%)',
                 backdropFilter: 'blur(20px)',
                 border: '1px solid rgba(255, 255, 255, 0.05)',
-                padding: isMobile ? '12px' : '20px'
+                padding: isMobile ? '16px' : '20px'
               }}>
                 <Flex align="center" justify="between">
                   <Box>
-                    <Text size={isMobile ? '1' : '2'} style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                    <Text size={isMobile ? '1' : '2'} style={{ 
+                      color: 'rgba(255, 255, 255, 0.6)', 
+                      display: 'block', 
+                      marginBottom: '4px' 
+                    }}>
                       {config?.label || key}
                     </Text>
                     <Text size={isMobile ? '5' : '6'} weight="bold">
                       {value}
                     </Text>
                   </Box>
-                  {config?.icon && (
-                    <Box style={{
-                      width: isMobile ? '32px' : '40px',
-                      height: isMobile ? '32px' : '40px',
-                      borderRadius: '10px',
-                      background: `${config?.color || '#8b5cf6'}20`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      <config.icon width="20" height="20" style={{ color: config?.color || '#8b5cf6' }} />
-                    </Box>
-                  )}
+                  <Box style={{
+                    width: isMobile ? '32px' : '40px',
+                    height: isMobile ? '32px' : '40px',
+                    borderRadius: '10px',
+                    background: `rgba(${config?.color === '#8b5cf6' ? '139, 92, 246' : 
+                                  config?.color === 'amber' ? '245, 158, 11' :
+                                  config?.color === 'blue' ? '59, 130, 246' :
+                                  config?.color === 'green' ? '16, 185, 129' : '139, 92, 246'}, 0.2)`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <config.icon 
+                      width="20" 
+                      height="20" 
+                      style={{ 
+                        color: config?.color === 'amber' ? '#f59e0b' :
+                              config?.color === 'blue' ? '#3b82f6' :
+                              config?.color === 'green' ? '#10b981' :
+                              config?.color || '#8b5cf6' 
+                      }} 
+                    />
+                  </Box>
                 </Flex>
               </Card>
             </motion.div>
@@ -263,7 +326,7 @@ const CustomerRequests = () => {
             />
             <input
               type="text"
-              placeholder={isMobile ? "Search..." : "Search by ID, username, or product..."}
+              placeholder={isMobile ? "Search..." : "Search by ID, name, or product..."}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{
@@ -312,187 +375,290 @@ const CustomerRequests = () => {
           </Text>
         </Card>
       ) : (
-        <Card style={{
-          background: 'rgba(20, 20, 25, 0.6)',
-          padding: 0,
-          overflow: 'hidden'
-        }}>
-          {isMobile ? (
-            <Box style={{ padding: '12px' }}>
-              {filteredOrders.map((order) => (
-                <Card key={order._id} style={{
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  marginBottom: '12px',
-                  padding: '12px'
-                }}>
-                  <Flex justify="between" mb="2">
-                    <Flex align="center" gap="2">
-                      <Checkbox
-                        checked={selectedOrders.has(order._id)}
-                        onCheckedChange={() => toggleOrderSelection(order._id)}
-                      />
-                      <Code size="1">#{order.custom_id}</Code>
+        <>
+          <Card style={{
+            background: 'rgba(20, 20, 25, 0.6)',
+            padding: 0,
+            overflow: 'hidden'
+          }}>
+            {isMobile ? (
+              <Box style={{ padding: '12px' }}>
+                {paginatedOrders.map((order) => (
+                  <Card key={order._id} style={{
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    marginBottom: '12px',
+                    padding: '12px'
+                  }}>
+                    <Flex justify="between" mb="2">
+                      <Flex align="center" gap="2">
+                        <Checkbox
+                          checked={selectedOrders.has(order._id)}
+                          onCheckedChange={() => toggleOrderSelection(order._id)}
+                        />
+                        <Code size="1">#{order.custom_id}</Code>
+                      </Flex>
+                      <Badge size="1" color={statusConfig[order.status]?.color}>
+                        {statusConfig[order.status]?.label}
+                      </Badge>
                     </Flex>
-                    <Badge size="1" color={statusConfig[order.status]?.color}>
-                      {statusConfig[order.status]?.label}
-                    </Badge>
-                  </Flex>
-                  
-                  <Text size="2" style={{ display: 'block', marginBottom: '8px' }}>
-                    @{order.username || `user${order.telegram_id}`}
-                  </Text>
-                  
-                  <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.7)', display: 'block', marginBottom: '8px' }}>
-                    {order.product_text}
-                  </Text>
-                  
-                  <Flex justify="between" align="center">
-                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                      {new Date(order.created_at).toLocaleDateString()}
+                    
+                    <Flex direction="column" gap="1" mb="2">
+                      <Flex align="center" gap="2">
+                        <Text size="2" weight="medium">
+                          {getDisplayName(order)}
+                        </Text>
+                        {getActualUsername(order) && (
+                          <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                            {getActualUsername(order)}
+                          </Text>
+                        )}
+                      </Flex>
+                      <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                        {getCustomerType(order)}
+                      </Text>
+                    </Flex>
+                    
+                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.7)', display: 'block', marginBottom: '8px' }}>
+                      {order.product_text}
                     </Text>
                     
-                    <Flex gap="1">
-                      <DropdownMenu.Root>
-                        <DropdownMenu.Trigger>
-                          <IconButton size="1" variant="soft">
-                            <DotsHorizontalIcon width="14" height="14" />
-                          </IconButton>
-                        </DropdownMenu.Trigger>
-                        <DropdownMenu.Content>
-                          {Object.entries(statusConfig).map(([value, config]) => (
-                            <DropdownMenu.Item
-                              key={value}
-                              onClick={() => updateOrderStatus(order._id, value)}
-                            >
-                              <Flex align="center" gap="2">
-                                <config.icon width="14" height="14" />
-                                {config.label}
-                              </Flex>
-                            </DropdownMenu.Item>
-                          ))}
-                          <DropdownMenu.Separator />
-                          <DropdownMenu.Item
-                            color="red"
-                            onClick={() => deleteOrder(order._id)}
-                          >
-                            <TrashIcon width="14" height="14" />
-                            Delete
-                          </DropdownMenu.Item>
-                        </DropdownMenu.Content>
-                      </DropdownMenu.Root>
-                    </Flex>
-                  </Flex>
-                </Card>
-              ))}
-            </Box>
-          ) : (
-            <Box style={{ overflowX: 'auto' }}>
-              <Table.Root variant="surface">
-                <Table.Header>
-                  <Table.Row>
-                    <Table.ColumnHeaderCell width="40px">
-                      <Checkbox
-                        checked={selectedOrders.size === filteredOrders.length && filteredOrders.length > 0}
-                        onCheckedChange={toggleSelectAll}
-                      />
-                    </Table.ColumnHeaderCell>
-                    <Table.ColumnHeaderCell>ID</Table.ColumnHeaderCell>
-                    <Table.ColumnHeaderCell>Date</Table.ColumnHeaderCell>
-                    <Table.ColumnHeaderCell>Customer</Table.ColumnHeaderCell>
-                    <Table.ColumnHeaderCell>Request</Table.ColumnHeaderCell>
-                    <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
-                    <Table.ColumnHeaderCell width="100px">Actions</Table.ColumnHeaderCell>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {filteredOrders.map((order) => {
-                    const StatusIcon = statusConfig[order.status]?.icon || ClockIcon;
-                    
-                    return (
-                      <Table.Row key={order._id}>
-                        <Table.Cell>
-                          <Checkbox
-                            checked={selectedOrders.has(order._id)}
-                            onCheckedChange={() => toggleOrderSelection(order._id)}
-                          />
-                        </Table.Cell>
-                        <Table.Cell>
-                          <Code size="2">#{order.custom_id}</Code>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <Flex direction="column" gap="1">
-                            <Text size="2">{new Date(order.created_at).toLocaleDateString()}</Text>
-                            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                              {new Date(order.created_at).toLocaleTimeString()}
-                            </Text>
-                          </Flex>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <Flex align="center" gap="2">
-                            <PersonIcon width="14" height="14" style={{ opacity: 0.6 }} />
-                            <Box>
-                              <Text size="2">@{order.username || `user${order.telegram_id}`}</Text>
-                              {order.first_name && (
-                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', display: 'block' }}>
-                                  {order.first_name} {order.last_name}
-                                </Text>
-                              )}
-                            </Box>
-                          </Flex>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <Text size="2" style={{ maxWidth: '300px', display: 'block' }}>
-                            {order.product_text}
-                          </Text>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <DropdownMenu.Root>
-                            <DropdownMenu.Trigger>
-                              <Button
-                                variant="soft"
-                                color={statusConfig[order.status]?.color}
-                                size="2"
+                    <Flex justify="between" align="center">
+                      <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                        {new Date(order.created_at).toLocaleDateString()}
+                      </Text>
+                      
+                      <Flex gap="1">
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger>
+                            <IconButton size="1" variant="soft">
+                              <DotsHorizontalIcon width="14" height="14" />
+                            </IconButton>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Content>
+                            {Object.entries(statusConfig).map(([value, config]) => (
+                              <DropdownMenu.Item
+                                key={value}
+                                onClick={() => updateOrderStatus(order._id, value)}
                               >
                                 <Flex align="center" gap="2">
-                                  <StatusIcon width="14" height="14" />
-                                  {statusConfig[order.status]?.label}
-                                  <ChevronDownIcon width="14" height="14" />
+                                  <config.icon width="14" height="14" />
+                                  {config.label}
                                 </Flex>
-                              </Button>
-                            </DropdownMenu.Trigger>
-                            <DropdownMenu.Content>
-                              {Object.entries(statusConfig).map(([value, config]) => (
-                                <DropdownMenu.Item
-                                  key={value}
-                                  onClick={() => updateOrderStatus(order._id, value)}
+                              </DropdownMenu.Item>
+                            ))}
+                            <DropdownMenu.Separator />
+                            <DropdownMenu.Item
+                              color="red"
+                              onClick={() => deleteOrder(order._id)}
+                            >
+                              <TrashIcon width="14" height="14" />
+                              Delete
+                            </DropdownMenu.Item>
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Root>
+                      </Flex>
+                    </Flex>
+                  </Card>
+                ))}
+              </Box>
+            ) : (
+              <Box style={{ overflowX: 'auto' }}>
+                <Table.Root variant="surface">
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.ColumnHeaderCell width="40px" style={{ verticalAlign: 'middle' }}>
+                        <Checkbox
+                          checked={selectedOrders.size === paginatedOrders.length && paginatedOrders.length > 0}
+                          onCheckedChange={toggleSelectAll}
+                        />
+                      </Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell style={{ verticalAlign: 'middle' }}>ID</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell style={{ verticalAlign: 'middle' }}>Date</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell style={{ verticalAlign: 'middle' }}>Customer</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell style={{ verticalAlign: 'middle' }}>Request</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell style={{ verticalAlign: 'middle' }}>Status</Table.ColumnHeaderCell>
+                      <Table.ColumnHeaderCell width="100px" style={{ verticalAlign: 'middle' }}>Actions</Table.ColumnHeaderCell>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {paginatedOrders.map((order) => {
+                      const StatusIcon = statusConfig[order.status]?.icon || ClockIcon;
+                      
+                      return (
+                        <Table.Row key={order._id}>
+                          <Table.Cell style={{ verticalAlign: 'middle' }}>
+                            <Checkbox
+                              checked={selectedOrders.has(order._id)}
+                              onCheckedChange={() => toggleOrderSelection(order._id)}
+                            />
+                          </Table.Cell>
+                          <Table.Cell style={{ verticalAlign: 'middle' }}>
+                            <Code size="2">#{order.custom_id}</Code>
+                          </Table.Cell>
+                          <Table.Cell style={{ verticalAlign: 'middle' }}>
+                            <Flex direction="column" gap="1">
+                              <Text size="2">{new Date(order.created_at).toLocaleDateString()}</Text>
+                              <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                {new Date(order.created_at).toLocaleTimeString()}
+                              </Text>
+                            </Flex>
+                          </Table.Cell>
+                          <Table.Cell style={{ verticalAlign: 'middle' }}>
+                            <Flex direction="column" gap="1">
+                              <Flex align="center" gap="2">
+                                <Text size="2" weight="medium">
+                                  {getDisplayName(order)}
+                                </Text>
+                                {getActualUsername(order) && (
+                                  <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                                    {getActualUsername(order)}
+                                  </Text>
+                                )}
+                              </Flex>
+                              <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                {getCustomerType(order)}
+                              </Text>
+                            </Flex>
+                        </Table.Cell>
+                          <Table.Cell style={{ verticalAlign: 'middle' }}>
+                            <Text size="2" style={{ maxWidth: '300px', display: 'block' }}>
+                              {order.product_text}
+                            </Text>
+                          </Table.Cell>
+                          <Table.Cell style={{ verticalAlign: 'middle' }}>
+                            <DropdownMenu.Root>
+                              <DropdownMenu.Trigger>
+                                <Button
+                                  variant="soft"
+                                  color={statusConfig[order.status]?.color}
+                                  size="2"
                                 >
                                   <Flex align="center" gap="2">
-                                    <config.icon width="14" height="14" />
-                                    {config.label}
+                                    <StatusIcon width="14" height="14" />
+                                    {statusConfig[order.status]?.label}
+                                    <ChevronDownIcon width="14" height="14" />
                                   </Flex>
-                                </DropdownMenu.Item>
-                              ))}
-                            </DropdownMenu.Content>
-                          </DropdownMenu.Root>
-                        </Table.Cell>
-                        <Table.Cell>
-                          <IconButton
-                            size="2"
-                            variant="ghost"
-                            color="red"
-                            onClick={() => deleteOrder(order._id)}
-                          >
-                            <TrashIcon width="16" height="16" />
-                          </IconButton>
-                        </Table.Cell>
-                      </Table.Row>
-                    );
-                  })}
-                </Table.Body>
-              </Table.Root>
-            </Box>
+                                </Button>
+                              </DropdownMenu.Trigger>
+                              <DropdownMenu.Content>
+                                {Object.entries(statusConfig).map(([value, config]) => (
+                                  <DropdownMenu.Item
+                                    key={value}
+                                    onClick={() => updateOrderStatus(order._id, value)}
+                                  >
+                                    <Flex align="center" gap="2">
+                                      <config.icon width="14" height="14" />
+                                      {config.label}
+                                    </Flex>
+                                  </DropdownMenu.Item>
+                                ))}
+                              </DropdownMenu.Content>
+                            </DropdownMenu.Root>
+                          </Table.Cell>
+                          <Table.Cell style={{ verticalAlign: 'middle' }}>
+                            <IconButton
+                              size="2"
+                              variant="ghost"
+                              color="red"
+                              onClick={() => deleteOrder(order._id)}
+                            >
+                              <TrashIcon width="16" height="16" />
+                            </IconButton>
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })}
+                  </Table.Body>
+                </Table.Root>
+              </Box>
+            )}
+          </Card>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Card style={{
+              background: 'rgba(20, 20, 25, 0.6)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              padding: isMobile ? '12px' : '16px',
+              marginTop: '24px'
+            }}>
+              <Flex align="center" justify="between" gap="3">
+                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                  Showing {startIndex + 1}-{Math.min(endIndex, filteredOrders.length)} of {filteredOrders.length}
+                </Text>
+                
+                <Flex gap="2" align="center">
+                  <IconButton
+                    size="2"
+                    variant="soft"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(1)}
+                  >
+                    <DoubleArrowLeftIcon width="16" height="16" />
+                  </IconButton>
+                  
+                  <IconButton
+                    size="2"
+                    variant="soft"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(currentPage - 1)}
+                  >
+                    <ChevronLeftIcon width="16" height="16" />
+                  </IconButton>
+                  
+                  <Flex gap="1" align="center">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      
+                      return (
+                        <Button
+                          key={pageNum}
+                          size="2"
+                          variant={currentPage === pageNum ? "solid" : "soft"}
+                          onClick={() => setCurrentPage(pageNum)}
+                          style={{
+                            minWidth: '40px',
+                            background: currentPage === pageNum ? '#8b5cf6' : undefined
+                          }}
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </Flex>
+                  
+                  <IconButton
+                    size="2"
+                    variant="soft"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(currentPage + 1)}
+                  >
+                    <ChevronRightIcon width="16" height="16" />
+                  </IconButton>
+                  
+                  <IconButton
+                    size="2"
+                    variant="soft"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(totalPages)}
+                  >
+                    <DoubleArrowRightIcon width="16" height="16" />
+                  </IconButton>
+                </Flex>
+              </Flex>
+            </Card>
           )}
-        </Card>
+        </>
       )}
 
       <Dialog.Root open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>

@@ -14,6 +14,47 @@ import {
 } from '@radix-ui/react-icons';
 import { chatAPI } from '../services/api';
 
+// Avatar color generator - creates vibrant, high-contrast colors
+const getAvatarGradient = (id) => {
+    // Convert ID to a number for consistent color generation
+    const numId = typeof id === 'string' ? 
+        id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : 
+        id;
+    
+    // Define vibrant color pairs for gradients
+    const gradients = [
+        ['#FF6B6B', '#FF3838'], // Red
+        ['#4ECDC4', '#44A99C'], // Teal
+        ['#FFD93D', '#FFB830'], // Yellow
+        ['#A8E6CF', '#7FD1B9'], // Mint
+        ['#FF8CC3', '#FF6AAC'], // Pink
+        ['#95E1D3', '#6BC7B5'], // Turquoise
+        ['#FFA502', '#FF8C00'], // Orange
+        ['#C56CF0', '#A55EC3'], // Purple
+        ['#4834D4', '#3742FA'], // Blue
+        ['#22A6B3', '#1E8C96'], // Cyan
+        ['#F8B500', '#E5A200'], // Gold
+        ['#EB4D4B', '#C23633'], // Coral
+        ['#686DE0', '#5A5FCF'], // Indigo
+        ['#30336B', '#282C5F'], // Navy
+        ['#BADC58', '#A4C948'], // Lime
+        ['#FF6348', '#FF4234'], // Tomato
+        ['#7BED9F', '#5ED17C'], // Emerald
+        ['#DFE4EA', '#C7CDD6'], // Silver
+        ['#FFA07A', '#FF8A65'], // Light Salmon
+        ['#20BF6B', '#1AA156']  // Green
+    ];
+    
+    const index = Math.abs(numId) % gradients.length;
+    return gradients[index];
+};
+
+// Get single color for badges/borders
+const getAvatarBorderColor = (id) => {
+    const colors = getAvatarGradient(id);
+    return colors[0];
+};
+
 const Chat = () => {
     // State
     const [conversations, setConversations] = useState([]);
@@ -348,70 +389,82 @@ const Chat = () => {
     }
 
     // Mobile Conversation Card Component
-    const ConversationCard = ({ conv, isSelected }) => (
-        <motion.div
-            whileHover={!isMobile ? { scale: 1.02 } : {}}
-            whileTap={{ scale: 0.98 }}
-        >
-            <Card
-                onClick={() => selectConversation(conv)}
-                style={{
-                    background: isSelected
-                        ? 'rgba(139, 92, 246, 0.1)'
-                        : 'rgba(255, 255, 255, 0.03)',
-                    border: isSelected
-                        ? '1px solid rgba(139, 92, 246, 0.3)'
-                        : '1px solid transparent',
-                    marginBottom: '8px',
-                    cursor: 'pointer',
-                    padding: isMobile ? '10px' : '12px',
-                    transition: 'all 0.2s'
-                }}
+    const ConversationCard = ({ conv, isSelected }) => {
+        const [color1, color2] = getAvatarGradient(conv.telegram_id);
+        const borderColor = getAvatarBorderColor(conv.telegram_id);
+        
+        return (
+            <motion.div
+                whileHover={!isMobile ? { scale: 1.02 } : {}}
+                whileTap={{ scale: 0.98 }}
             >
-                <Flex align="start" justify="between">
-                    <Flex align="center" gap={isMobile ? '2' : '3'}>
-                        <Avatar
-                            size={isMobile ? '2' : '3'}
-                            fallback={conv.username?.slice(0, 2).toUpperCase() || 'U'}
-                            style={{
-                                background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
-                            }}
-                        />
-                        <Box>
-                            <Flex align="center" gap="2">
-                                <Text size="2" weight="medium">
-                                    @{conv.username || `user${conv.telegram_id}`}
+                <Card
+                    onClick={() => selectConversation(conv)}
+                    style={{
+                        background: isSelected
+                            ? 'rgba(139, 92, 246, 0.1)'
+                            : 'rgba(255, 255, 255, 0.03)',
+                        border: isSelected
+                            ? '1px solid rgba(139, 92, 246, 0.3)'
+                            : '1px solid transparent',
+                        marginBottom: '8px',
+                        cursor: 'pointer',
+                        padding: isMobile ? '10px' : '12px',
+                        transition: 'all 0.2s'
+                    }}
+                >
+                    <Flex align="start" justify="between">
+                        <Flex align="center" gap={isMobile ? '2' : '3'}>
+                            <Avatar
+                                size={isMobile ? '2' : '3'}
+                                fallback={conv.username?.slice(0, 2).toUpperCase() || conv.telegram_id?.toString().slice(0, 2) || 'U'}
+                                style={{
+                                    background: `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)`,
+                                    border: `2px solid ${borderColor}30`,
+                                    boxShadow: `0 2px 8px ${borderColor}40`,
+                                    color: '#FFFFFF',
+                                    fontWeight: 'bold'
+                                }}
+                            />
+                            <Box>
+                                <Flex align="center" gap="2">
+                                    <Text size="2" weight="medium">
+                                        @{conv.username || `user${conv.telegram_id}`}
+                                    </Text>
+                                    {conv.unread_count > 0 && (
+                                        <Badge size="1" color="red">
+                                            {conv.unread_count}
+                                        </Badge>
+                                    )}
+                                </Flex>
+                                <Text size="1" style={{
+                                    color: 'rgba(255, 255, 255, 0.5)',
+                                    display: 'block',
+                                    marginTop: '2px',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    maxWidth: isMobile ? '160px' : '180px'
+                                }}>
+                                    {conv.last_message || 'No messages'}
                                 </Text>
-                                {conv.unread_count > 0 && (
-                                    <Badge size="1" color="red">
-                                        {conv.unread_count}
-                                    </Badge>
-                                )}
-                            </Flex>
-                            <Text size="1" style={{
-                                color: 'rgba(255, 255, 255, 0.5)',
-                                display: 'block',
-                                marginTop: '2px',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                maxWidth: isMobile ? '160px' : '180px'
-                            }}>
-                                {conv.last_message || 'No messages'}
-                            </Text>
-                        </Box>
-                    </Flex>
+                            </Box>
+                        </Flex>
 
-                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
-                        {formatTime(conv.last_message_time)}
-                    </Text>
-                </Flex>
-            </Card>
-        </motion.div>
-    );
+                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
+                            {formatTime(conv.last_message_time)}
+                        </Text>
+                    </Flex>
+                </Card>
+            </motion.div>
+        );
+    };
 
     // Mobile Chat View
     if (isMobile && showMobileChat && selectedConversation) {
+        const [color1, color2] = getAvatarGradient(selectedConversation.telegram_id);
+        const borderColor = getAvatarBorderColor(selectedConversation.telegram_id);
+        
         return (
             <Box style={{ 
                 position: 'fixed',
@@ -447,9 +500,13 @@ const Chat = () => {
                             </IconButton>
                             <Avatar
                                 size="2"
-                                fallback={selectedConversation.username?.slice(0, 2).toUpperCase() || 'U'}
+                                fallback={selectedConversation.username?.slice(0, 2).toUpperCase() || selectedConversation.telegram_id?.toString().slice(0, 2) || 'U'}
                                 style={{
-                                    background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
+                                    background: `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)`,
+                                    border: `2px solid ${borderColor}30`,
+                                    boxShadow: `0 2px 8px ${borderColor}40`,
+                                    color: '#FFFFFF',
+                                    fontWeight: 'bold'
                                 }}
                             />
                             <Box>
@@ -845,13 +902,25 @@ const Chat = () => {
                                     borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
                                 }}>
                                     <Flex align="center" gap="3">
-                                        <Avatar
-                                            size="3"
-                                            fallback={selectedConversation.username?.slice(0, 2).toUpperCase() || 'U'}
-                                            style={{
-                                                background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
-                                            }}
-                                        />
+                                        {(() => {
+                                            const [color1, color2] = getAvatarGradient(selectedConversation.telegram_id);
+                                            const borderColor = getAvatarBorderColor(selectedConversation.telegram_id);
+                                            
+                                            return (
+                                                <Avatar
+                                                    size="3"
+                                                    fallback={selectedConversation.username?.slice(0, 2).toUpperCase() || selectedConversation.telegram_id?.toString().slice(0, 2) || 'U'}
+                                                    style={{
+                                                        background: `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)`,
+                                                        border: `2px solid ${borderColor}30`,
+                                                        boxShadow: `0 2px 12px ${borderColor}40`,
+                                                        color: '#FFFFFF',
+                                                        fontWeight: 'bold',
+                                                        fontSize: '14px'
+                                                    }}
+                                                />
+                                            );
+                                        })()}
                                         <Box>
                                             <Text size="3" weight="medium">
                                                 @{selectedConversation.username || `user${selectedConversation.telegram_id}`}

@@ -4,6 +4,19 @@
   box-sizing: border-box;
 }
 
+menuButtonStyle {
+  width: 100%;
+  justifyContent :flex-start;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  paddingTop: 12px;
+  paddingBottom: 12px;
+  display: flex;
+  alignItems: center;
+  minHeight: 48px;
+};
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   background: #0a0a0a;

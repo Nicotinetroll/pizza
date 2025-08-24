@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Box, Flex, Grid, Text, Card, Badge, Button, Select,
@@ -10,7 +10,7 @@ import {
   ChevronDownIcon, ChevronRightIcon, ClockIcon, CheckCircledIcon,
   CrossCircledIcon, RocketIcon, CopyIcon, ExternalLinkIcon,
   InfoCircledIcon, IdCardIcon, GlobeIcon, CubeIcon, PersonIcon,
-  DotsHorizontalIcon
+  DotsHorizontalIcon, ChevronLeftIcon, DoubleArrowLeftIcon, DoubleArrowRightIcon
 } from '@radix-ui/react-icons';
 import { ordersAPI, usersAPI } from '../services/api';
 
@@ -21,6 +21,182 @@ const statusConfig = {
   processing: { color: 'purple', icon: RocketIcon, label: 'Processing' },
   completed: { color: 'green', icon: CheckCircledIcon, label: 'Completed' },
   cancelled: { color: 'red', icon: CrossCircledIcon, label: 'Cancelled' }
+};
+
+// Pagination Component
+const Pagination = ({ currentPage, totalPages, itemsPerPage, totalItems, onPageChange, onItemsPerPageChange, isMobile }) => {
+  const pageNumbers = [];
+  const maxVisiblePages = isMobile ? 3 : 5;
+  
+  let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+  let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+  
+  if (endPage - startPage < maxVisiblePages - 1) {
+    startPage = Math.max(1, endPage - maxVisiblePages + 1);
+  }
+  
+  for (let i = startPage; i <= endPage; i++) {
+    pageNumbers.push(i);
+  }
+  
+  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+  
+  return (
+    <Card style={{
+      background: 'rgba(20, 20, 25, 0.6)',
+      backdropFilter: 'blur(20px)',
+      border: '1px solid rgba(255, 255, 255, 0.05)',
+      padding: isMobile ? '12px' : '16px',
+      marginTop: '20px'
+    }}>
+      <Flex 
+        align="center" 
+        justify="between"
+        direction={isMobile ? 'column' : 'row'}
+        gap={isMobile ? '3' : '0'}
+      >
+        {/* Items info */}
+        <Flex align="center" gap={isMobile ? '2' : '3'}>
+          <Text size={isMobile ? '1' : '2'} style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+            Showing {startItem}-{endItem} of {totalItems} orders
+          </Text>
+          
+          {!isMobile && (
+            <Select.Root value={itemsPerPage.toString()} onValueChange={(value) => onItemsPerPageChange(Number(value))}>
+              <Select.Trigger size="1" variant="soft">
+                <Text size="2">{itemsPerPage} per page</Text>
+              </Select.Trigger>
+              <Select.Content>
+                {[10, 20, 30, 50, 100].map(value => (
+                  <Select.Item key={value} value={value.toString()}>
+                    {value} per page
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
+          )}
+        </Flex>
+        
+        {/* Page controls */}
+        <Flex align="center" gap={isMobile ? '1' : '2'}>
+          {/* First page */}
+          <IconButton
+            size={isMobile ? '1' : '2'}
+            variant="soft"
+            disabled={currentPage === 1}
+            onClick={() => onPageChange(1)}
+            style={{ opacity: currentPage === 1 ? 0.3 : 1 }}
+          >
+            <DoubleArrowLeftIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} />
+          </IconButton>
+          
+          {/* Previous page */}
+          <IconButton
+            size={isMobile ? '1' : '2'}
+            variant="soft"
+            disabled={currentPage === 1}
+            onClick={() => onPageChange(currentPage - 1)}
+            style={{ opacity: currentPage === 1 ? 0.3 : 1 }}
+          >
+            <ChevronLeftIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} />
+          </IconButton>
+          
+          {/* Page numbers */}
+          <Flex gap={isMobile ? '1' : '2'}>
+            {startPage > 1 && (
+              <>
+                <Button
+                  size={isMobile ? '1' : '2'}
+                  variant="soft"
+                  onClick={() => onPageChange(1)}
+                >
+                  1
+                </Button>
+                {startPage > 2 && (
+                  <Text size={isMobile ? '1' : '2'} style={{ padding: '0 4px', color: 'rgba(255, 255, 255, 0.3)' }}>
+                    ...
+                  </Text>
+                )}
+              </>
+            )}
+            
+            {pageNumbers.map(number => (
+              <Button
+                key={number}
+                size={isMobile ? '1' : '2'}
+                variant={currentPage === number ? 'solid' : 'soft'}
+                onClick={() => onPageChange(number)}
+                style={{
+                  background: currentPage === number ? 
+                    'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' : 
+                    'rgba(255, 255, 255, 0.05)',
+                  minWidth: isMobile ? '28px' : '36px'
+                }}
+              >
+                {number}
+              </Button>
+            ))}
+            
+            {endPage < totalPages && (
+              <>
+                {endPage < totalPages - 1 && (
+                  <Text size={isMobile ? '1' : '2'} style={{ padding: '0 4px', color: 'rgba(255, 255, 255, 0.3)' }}>
+                    ...
+                  </Text>
+                )}
+                <Button
+                  size={isMobile ? '1' : '2'}
+                  variant="soft"
+                  onClick={() => onPageChange(totalPages)}
+                >
+                  {totalPages}
+                </Button>
+              </>
+            )}
+          </Flex>
+          
+          {/* Next page */}
+          <IconButton
+            size={isMobile ? '1' : '2'}
+            variant="soft"
+            disabled={currentPage === totalPages}
+            onClick={() => onPageChange(currentPage + 1)}
+            style={{ opacity: currentPage === totalPages ? 0.3 : 1 }}
+          >
+            <ChevronRightIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} />
+          </IconButton>
+          
+          {/* Last page */}
+          <IconButton
+            size={isMobile ? '1' : '2'}
+            variant="soft"
+            disabled={currentPage === totalPages}
+            onClick={() => onPageChange(totalPages)}
+            style={{ opacity: currentPage === totalPages ? 0.3 : 1 }}
+          >
+            <DoubleArrowRightIcon width={isMobile ? '14' : '16'} height={isMobile ? '14' : '16'} />
+          </IconButton>
+        </Flex>
+        
+        {/* Mobile items per page selector */}
+        {isMobile && (
+          <Select.Root value={itemsPerPage.toString()} onValueChange={(value) => onItemsPerPageChange(Number(value))}>
+            <Select.Trigger size="2" variant="soft" style={{ width: '100%' }}>
+              <Text size="2">{itemsPerPage} per page</Text>
+            </Select.Trigger>
+            <Select.Content>
+              {[10, 20, 30, 50].map(value => (
+                <Select.Item key={value} value={value.toString()}>
+                  {value} per page
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
+        )}
+      </Flex>
+    </Card>
+  );
 };
 
 // Mobile Order Card Component
@@ -106,20 +282,6 @@ const MobileOrderCard = ({ order, onStatusUpdate, onViewDetails }) => {
           </Flex>
         </Flex>
 
-        {/* Items Preview */}
-        {!isMobile && order.items && order.items.length > 0 && (
-          <Box style={{
-            padding: '8px',
-            background: 'rgba(255, 255, 255, 0.02)',
-            borderRadius: '6px',
-            marginBottom: '12px'
-          }}>
-            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-              {order.items.length} item{order.items.length > 1 ? 's' : ''}: {order.items.map(i => `${i.quantity}x ${i.product_name}`).join(', ').slice(0, 50)}...
-            </Text>
-          </Box>
-        )}
-
         {/* Footer */}
         <Flex align="center" justify="between">
           <Flex align="center" gap="2">
@@ -147,7 +309,7 @@ const MobileOrderCard = ({ order, onStatusUpdate, onViewDetails }) => {
   );
 };
 
-// Order detail modal component (optimized for mobile)
+// Order detail modal component
 const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
   const [newStatus, setNewStatus] = useState(order?.status || 'pending');
   const [updating, setUpdating] = useState(false);
@@ -260,63 +422,29 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
               {/* Order Items */}
               <Card style={{ padding: isMobile ? '12px' : '16px' }}>
                 <Heading size={isMobile ? '2' : '3'} mb={isMobile ? '2' : '3'}>Order Items</Heading>
-                {isMobile ? (
-                  <Flex direction="column" gap="2">
-                    {order.items?.map((item, idx) => (
-                      <Box key={idx} style={{
-                        padding: '10px',
-                        background: 'rgba(255, 255, 255, 0.02)',
-                        borderRadius: '6px',
-                        border: '1px solid rgba(255, 255, 255, 0.05)'
-                      }}>
-                        <Flex justify="between" mb="1">
-                          <Text size="2" weight="medium">{item.product_name}</Text>
-                          <Badge size="1" variant="soft">{item.quantity}x</Badge>
-                        </Flex>
-                        <Flex justify="between">
-                          <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                            ${item.price_usdt?.toFixed(2)} each
-                          </Text>
-                          <Text size="2" weight="bold" style={{ color: '#10b981' }}>
-                            ${item.subtotal_usdt?.toFixed(2)}
-                          </Text>
-                        </Flex>
-                      </Box>
-                    ))}
-                  </Flex>
-                ) : (
-                  <Table.Root variant="surface">
-                    <Table.Header>
-                      <Table.Row>
-                        <Table.ColumnHeaderCell>Product</Table.ColumnHeaderCell>
-                        <Table.ColumnHeaderCell>Price</Table.ColumnHeaderCell>
-                        <Table.ColumnHeaderCell>Qty</Table.ColumnHeaderCell>
-                        <Table.ColumnHeaderCell>Total</Table.ColumnHeaderCell>
-                      </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                      {order.items?.map((item, idx) => (
-                        <Table.Row key={idx}>
-                          <Table.Cell>
-                            <Flex align="center" gap="2">
-                              <CubeIcon width="16" height="16" style={{ opacity: 0.6 }} />
-                              <Text size="2">{item.product_name}</Text>
-                            </Flex>
-                          </Table.Cell>
-                          <Table.Cell>
-                            <Text size="2">${item.price_usdt?.toFixed(2)}</Text>
-                          </Table.Cell>
-                          <Table.Cell>
-                            <Badge variant="soft">{item.quantity}</Badge>
-                          </Table.Cell>
-                          <Table.Cell>
-                            <Text size="2" weight="medium">${item.subtotal_usdt?.toFixed(2)}</Text>
-                          </Table.Cell>
-                        </Table.Row>
-                      ))}
-                    </Table.Body>
-                  </Table.Root>
-                )}
+                <Flex direction="column" gap="2">
+                  {order.items?.map((item, idx) => (
+                    <Box key={idx} style={{
+                      padding: '10px',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 255, 255, 0.05)'
+                    }}>
+                      <Flex justify="between" mb="1">
+                        <Text size="2" weight="medium">{item.product_name}</Text>
+                        <Badge size="1" variant="soft">{item.quantity}x</Badge>
+                      </Flex>
+                      <Flex justify="between">
+                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                          ${item.price_usdt?.toFixed(2)} each
+                        </Text>
+                        <Text size="2" weight="bold" style={{ color: '#10b981' }}>
+                          ${item.subtotal_usdt?.toFixed(2)}
+                        </Text>
+                      </Flex>
+                    </Box>
+                  ))}
+                </Flex>
 
                 {/* Totals */}
                 <Separator size="4" my={isMobile ? '2' : '3'} />
@@ -442,7 +570,7 @@ const OrderDetailModal = ({ order, isOpen, onClose, onStatusUpdate }) => {
 };
 
 const Orders = () => {
-  const [orders, setOrders] = useState([]);
+  const [allOrders, setAllOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -451,10 +579,19 @@ const Orders = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(isMobile ? 10 : 20);
+  
+  // User cache for performance
+  const [userCache, setUserCache] = useState({});
 
   useEffect(() => {
     const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      setItemsPerPage(mobile ? 10 : 20);
     };
     
     window.addEventListener('resize', handleResize);
@@ -465,55 +602,68 @@ const Orders = () => {
     fetchOrders();
   }, []);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await ordersAPI.getAll();
+      // Fetch orders and users in parallel for better performance
+      const [ordersResponse, usersResponse] = await Promise.all([
+        ordersAPI.getAll(),
+        usersAPI.getAll().catch(() => ({ users: [] })) // Fallback if users fail
+      ]);
       
-      // Fetch user details for orders that have telegram_id but no username
-      const ordersWithUsernames = await Promise.all(
-        (response.orders || []).map(async (order) => {
-          // If order already has username, use it
-          if (order.username) {
-            return order;
-          }
-          
-          // Try to find user by telegram_id to get username
-          try {
-            const usersResponse = await usersAPI.getAll();
-            const user = usersResponse.users?.find(u => u.telegram_id === order.telegram_id);
-            if (user) {
-              return { ...order, username: user.username };
-            }
-          } catch (err) {
-            console.error('Error fetching user for order:', err);
-          }
-          
-          return order;
-        })
-      );
+      // Create user lookup map for O(1) access
+      const userMap = {};
+      if (usersResponse.users) {
+        usersResponse.users.forEach(user => {
+          userMap[user.telegram_id] = user;
+        });
+      }
+      setUserCache(userMap);
       
-      setOrders(ordersWithUsernames);
+      // Enrich orders with user data (no additional API calls needed)
+      const enrichedOrders = (ordersResponse.orders || []).map(order => {
+        const user = userMap[order.telegram_id];
+        return {
+          ...order,
+          username: order.username || user?.username || null,
+          first_name: order.first_name || user?.first_name || null,
+          last_name: order.last_name || user?.last_name || null
+        };
+      });
+      
+      setAllOrders(enrichedOrders);
     } catch (error) {
       console.error('Error fetching orders:', error);
-      setOrders([]);
+      setAllOrders([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   const handleRefresh = () => {
     setRefreshing(true);
+    setCurrentPage(1);
     fetchOrders();
   };
 
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
       await ordersAPI.updateStatus(orderId, newStatus);
-      await fetchOrders();
+      
+      // Update local state immediately for better UX
+      setAllOrders(prevOrders => 
+        prevOrders.map(order => 
+          order._id === orderId ? { ...order, status: newStatus } : order
+        )
+      );
+      
+      // Fetch fresh data in background
+      fetchOrders();
     } catch (error) {
       console.error('Error updating order status:', error);
+      // Revert on error
+      fetchOrders();
     }
   };
 
@@ -532,26 +682,54 @@ const Orders = () => {
     setModalOpen(true);
   };
 
-  // Filter orders
-  const filteredOrders = orders.filter(order => {
-    const searchLower = searchTerm.toLowerCase();
-    const matchesSearch = 
-      order.order_number?.toLowerCase().includes(searchLower) ||
-      order.telegram_id?.toString().includes(searchTerm) ||
-      order.delivery_city?.toLowerCase().includes(searchLower) ||
-      order.delivery_country?.toLowerCase().includes(searchLower) ||
-      order.username?.toLowerCase().includes(searchLower);
-    const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  // Memoized filtered orders for performance
+  const filteredOrders = useMemo(() => {
+    return allOrders.filter(order => {
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = 
+        order.order_number?.toLowerCase().includes(searchLower) ||
+        order.telegram_id?.toString().includes(searchTerm) ||
+        order.delivery_city?.toLowerCase().includes(searchLower) ||
+        order.delivery_country?.toLowerCase().includes(searchLower) ||
+        order.username?.toLowerCase().includes(searchLower);
+      const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [allOrders, searchTerm, statusFilter]);
+
+  // Paginated orders
+  const paginatedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredOrders.slice(startIndex, endIndex);
+  }, [filteredOrders, currentPage, itemsPerPage]);
+
+  // Calculate pagination info
+  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
 
   // Calculate stats
-  const stats = {
-    total: orders.length,
-    pending: orders.filter(o => o.status === 'pending').length,
-    paid: orders.filter(o => o.status === 'paid').length,
-    processing: orders.filter(o => o.status === 'processing').length,
-    completed: orders.filter(o => o.status === 'completed').length
+  const stats = useMemo(() => ({
+    total: allOrders.length,
+    pending: allOrders.filter(o => o.status === 'pending').length,
+    paid: allOrders.filter(o => o.status === 'paid').length,
+    processing: allOrders.filter(o => o.status === 'processing').length,
+    completed: allOrders.filter(o => o.status === 'completed').length
+  }), [allOrders]);
+
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    // Scroll to top of orders list
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleItemsPerPageChange = (newItemsPerPage) => {
+    setItemsPerPage(newItemsPerPage);
+    setCurrentPage(1);
   };
 
   if (loading) {
@@ -783,7 +961,7 @@ const Orders = () => {
           {isMobile ? (
             // Mobile Cards View
             <Box>
-              {filteredOrders.map((order) => (
+              {paginatedOrders.map((order) => (
                 <MobileOrderCard
                   key={order._id}
                   order={order}
@@ -816,7 +994,7 @@ const Orders = () => {
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
-                    {filteredOrders.map((order, idx) => {
+                    {paginatedOrders.map((order, idx) => {
                       const isExpanded = expandedRows.has(order._id);
                       const StatusIcon = statusConfig[order.status]?.icon || ClockIcon;
                       
@@ -1018,6 +1196,19 @@ const Orders = () => {
                 </Table.Root>
               </Box>
             </Card>
+          )}
+          
+          {/* Pagination */}
+          {filteredOrders.length > 0 && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              itemsPerPage={itemsPerPage}
+              totalItems={filteredOrders.length}
+              onPageChange={handlePageChange}
+              onItemsPerPageChange={handleItemsPerPageChange}
+              isMobile={isMobile}
+            />
           )}
         </>
       )}

@@ -620,7 +620,7 @@ const MainApp = () => {
               <Separator size="4" style={{ opacity: 0.1, marginBottom: '24px' }} />
 
               <Box style={{ flex: 1 }}>
-                <Flex direction="column" gap="3">
+                <Flex direction="column" gap="1">
                   {navigationItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = activeTab === item.id;
@@ -643,6 +643,9 @@ const MainApp = () => {
                                 style={{
                                   width: '100%',
                                   justifyContent: 'flex-start',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  minHeight: '44px',
                                   background: isActive
                                       ? `linear-gradient(135deg, ${item.color}20 0%, ${item.color}10 100%)`
                                       : hasUnread
@@ -658,8 +661,8 @@ const MainApp = () => {
                                   overflow: 'hidden',
                                   transition: 'all 0.3s ease',
                                   paddingLeft: isActive ? '20px' : '12px',
-                                  paddingTop: '12px',
-                                  paddingBottom: '12px'
+                                  paddingTop: '10px',
+                                  paddingBottom: '10px'
                                 }}
                             >
                               {isActive && (
@@ -683,8 +686,21 @@ const MainApp = () => {
                                       }}
                                   />
                               )}
-                              <Flex align="center" gap="3" style={{ width: '100%' }}>
-                                <Box style={{ position: 'relative' }}>
+                              <Flex 
+                                align="center" 
+                                gap="3" 
+                                style={{ 
+                                  width: '100%',
+                                  height: '100%',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Box style={{ 
+                                  position: 'relative',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}>
                                   <Icon width="18" height="18" style={{ flexShrink: 0 }} />
                                   {hasUnread && (
                                       <motion.div
@@ -704,7 +720,15 @@ const MainApp = () => {
                                       />
                                   )}
                                 </Box>
-                                <Flex align="center" justify="between" style={{ flex: 1 }}>
+                                <Flex 
+                                  align="center" 
+                                  justify="between" 
+                                  style={{ 
+                                    flex: 1,
+                                    height: '100%',
+                                    alignItems: 'center'
+                                  }}
+                                >
                                   <Text size="2" weight={isActive ? 'medium' : 'regular'}>
                                     {item.label}
                                   </Text>
