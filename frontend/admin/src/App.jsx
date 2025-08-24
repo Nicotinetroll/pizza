@@ -9,9 +9,10 @@ import {
   MixIcon, RocketIcon, ExitIcon, LayersIcon, StarIcon,
   HamburgerMenuIcon, Cross2Icon, LockClosedIcon, LockOpen1Icon,
   BarChartIcon, IdCardIcon, CheckCircledIcon, CrossCircledIcon,
-  BellIcon, ChatBubbleIcon, GearIcon
+  BellIcon, ChatBubbleIcon, GearIcon, ExclamationTriangleIcon
 } from '@radix-ui/react-icons';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { customOrdersAPI } from './services/api';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
@@ -23,6 +24,7 @@ import Sellers from './pages/Sellers';
 import Notifications from './pages/Notifications';
 import Chat from './pages/Chat';
 import BotSettings from './pages/BotSettings';
+import CustomerRequests from './pages/CustomerRequests';
 
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, color: '#8b5cf6', mobileShow: true },
@@ -33,11 +35,11 @@ const navigationItems = [
   { id: 'sellers', label: 'Sellers', icon: IdCardIcon, color: '#14b8a6', mobileShow: false },
   { id: 'users', label: 'Users', icon: PersonIcon, color: '#6366f1', mobileShow: false },
   { id: 'chat', label: 'Chat', icon: ChatBubbleIcon, color: '#ec4899', mobileShow: false },
+  { id: 'requests', label: 'Requests', icon: ExclamationTriangleIcon, color: '#ef4444', mobileShow: false },
   { id: 'notifications', label: 'Notifs', icon: BellIcon, color: '#f59e0b', mobileShow: false },
   { id: 'botsettings', label: 'Bot Settings', icon: GearIcon, color: '#06b6d4', mobileShow: false },
 ];
 
-// Security status component
 const SecurityStatus = () => {
   const [encryptionKey, setEncryptionKey] = useState('');
   const [statusText, setStatusText] = useState('INITIALIZING');
@@ -117,8 +119,7 @@ const SecurityStatus = () => {
   );
 };
 
-// Mobile Bottom Navigation
-const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages }) => {
+const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages, unreadRequests }) => {
   const [showMore, setShowMore] = useState(false);
 
   const primaryItems = navigationItems.filter(item => item.mobileShow);
@@ -126,7 +127,6 @@ const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages }) => {
 
   return (
       <>
-        {/* More menu overlay */}
         <AnimatePresence>
           {showMore && (
               <motion.div
@@ -171,7 +171,8 @@ const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages }) => {
                     {moreItems.map((item) => {
                       const Icon = item.icon;
                       const isActive = activeTab === item.id;
-                      const hasUnread = item.id === 'chat' && unreadMessages > 0;
+                      const hasUnread = (item.id === 'chat' && unreadMessages > 0) || 
+                                       (item.id === 'requests' && unreadRequests > 0);
 
                       return (
                           <Button
@@ -215,7 +216,6 @@ const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages }) => {
           )}
         </AnimatePresence>
 
-        {/* Bottom Navigation Bar */}
         <Box style={{
           position: 'fixed',
           bottom: 0,
@@ -307,7 +307,7 @@ const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages }) => {
                         height="20"
                         style={{ color: 'rgba(255, 255, 255, 0.6)' }}
                     />
-                    {unreadMessages > 0 && (
+                    {(unreadMessages > 0 || unreadRequests > 0) && (
                         <Box style={{
                           position: 'absolute',
                           top: '-2px',
@@ -334,6 +334,7 @@ const MainApp = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [unreadRequests, setUnreadRequests] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const { isAuthenticated, logout, user } = useAuth();
 
@@ -349,7 +350,6 @@ const MainApp = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Fetch unread messages count
   const fetchUnreadCount = async () => {
     try {
       const response = await fetch('/api/chat/conversations?unread_only=true', {
@@ -368,11 +368,25 @@ const MainApp = () => {
     }
   };
 
+  const fetchUnreadRequests = async () => {
+    try {
+      const response = await customOrdersAPI.getUnreadCount();
+      setUnreadRequests(response.count || 0);
+    } catch (error) {
+      console.error('Error fetching unread requests:', error);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated) return;
 
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
+    fetchUnreadRequests();
+
+    const interval = setInterval(() => {
+      fetchUnreadCount();
+      fetchUnreadRequests();
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [isAuthenticated, activeTab]);
@@ -395,6 +409,7 @@ const MainApp = () => {
       sellers: Sellers,
       users: Users,
       chat: Chat,
+      requests: CustomerRequests,
       notifications: Notifications,
       botsettings: BotSettings,
     };
@@ -403,7 +418,6 @@ const MainApp = () => {
     return <Component />;
   };
 
-  // Mobile Layout
   if (isMobile) {
     return (
         <Box style={{
@@ -412,7 +426,6 @@ const MainApp = () => {
           paddingBottom: '75px',
           position: 'relative'
         }}>
-          {/* Mobile Header */}
           <Box style={{
             position: 'sticky',
             top: 0,
@@ -465,6 +478,11 @@ const MainApp = () => {
                       {unreadMessages}
                     </Badge>
                 )}
+                {activeTab === 'requests' && unreadRequests > 0 && (
+                    <Badge size="1" color="red" style={{ marginLeft: '8px' }}>
+                      {unreadRequests}
+                    </Badge>
+                )}
               </Flex>
 
               <DropdownMenu.Root>
@@ -494,7 +512,6 @@ const MainApp = () => {
             </Flex>
           </Box>
 
-          {/* Main Content */}
           <Box style={{
             padding: '16px',
             overflowX: 'hidden',
@@ -513,17 +530,16 @@ const MainApp = () => {
             </AnimatePresence>
           </Box>
 
-          {/* Mobile Bottom Navigation */}
           <MobileBottomNav
               activeTab={activeTab}
               setActiveTab={setActiveTab}
               unreadMessages={unreadMessages}
+              unreadRequests={unreadRequests}
           />
         </Box>
     );
   }
 
-  // Desktop Layout (Original)
   return (
       <Box style={{
         minHeight: '100vh',
@@ -542,7 +558,6 @@ const MainApp = () => {
         }} />
 
         <Flex style={{ position: 'relative', zIndex: 1 }}>
-          {/* Desktop Sidebar */}
           <Box
               style={{
                 width: '320px',
@@ -564,7 +579,6 @@ const MainApp = () => {
                   flexDirection: 'column'
                 }}
             >
-              {/* Logo */}
               <Flex align="center" gap="3" mb="6">
                 <motion.div
                     whileHover={{ rotate: 360 }}
@@ -605,14 +619,15 @@ const MainApp = () => {
 
               <Separator size="4" style={{ opacity: 0.1, marginBottom: '24px' }} />
 
-              {/* Navigation */}
               <Box style={{ flex: 1 }}>
                 <Flex direction="column" gap="3">
                   {navigationItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = activeTab === item.id;
                     const isChat = item.id === 'chat';
-                    const hasUnread = isChat && unreadMessages > 0;
+                    const isRequests = item.id === 'requests';
+                    const hasUnread = (isChat && unreadMessages > 0) || (isRequests && unreadRequests > 0);
+                    const unreadCount = isChat ? unreadMessages : isRequests ? unreadRequests : 0;
 
                     return (
                         <Box key={item.id} style={{ position: 'relative' }}>
@@ -631,12 +646,12 @@ const MainApp = () => {
                                   background: isActive
                                       ? `linear-gradient(135deg, ${item.color}20 0%, ${item.color}10 100%)`
                                       : hasUnread
-                                          ? 'rgba(236, 72, 153, 0.1)'
+                                          ? `${item.color}15`
                                           : 'transparent',
                                   border: isActive
                                       ? `1px solid ${item.color}40`
                                       : hasUnread
-                                          ? '1px solid rgba(236, 72, 153, 0.3)'
+                                          ? `1px solid ${item.color}30`
                                           : '1px solid transparent',
                                   color: isActive ? item.color : 'rgba(255, 255, 255, 0.7)',
                                   position: 'relative',
@@ -709,7 +724,7 @@ const MainApp = () => {
                                               animation: 'pulse 2s infinite'
                                             }}
                                         >
-                                          {unreadMessages > 99 ? '99+' : unreadMessages}
+                                          {unreadCount > 99 ? '99+' : unreadCount}
                                         </Badge>
                                       </motion.div>
                                   )}
@@ -723,7 +738,6 @@ const MainApp = () => {
                 </Flex>
               </Box>
 
-              {/* User section */}
               <Box mt="4">
                 <Separator size="4" style={{ opacity: 0.1, marginBottom: '16px' }} />
                 <Flex align="center" justify="between">
@@ -762,9 +776,7 @@ const MainApp = () => {
             </Box>
           </Box>
 
-          {/* Main Content */}
           <Box style={{ flex: 1, minHeight: '100vh', position: 'relative' }}>
-            {/* Top Bar */}
             <Box
                 style={{
                   position: 'sticky',
@@ -790,6 +802,11 @@ const MainApp = () => {
                     {activeTab === 'chat' && unreadMessages > 0 && (
                         <Badge size="2" color="red">
                           {unreadMessages} new
+                        </Badge>
+                    )}
+                    {activeTab === 'requests' && unreadRequests > 0 && (
+                        <Badge size="2" color="red">
+                          {unreadRequests} pending
                         </Badge>
                     )}
                     <Box style={{ opacity: 0.6 }}>
@@ -849,7 +866,6 @@ const MainApp = () => {
               </Flex>
             </Box>
 
-            {/* Page Content */}
             <Box style={{ padding: '24px' }}>
               <AnimatePresence mode="wait">
                 <motion.div

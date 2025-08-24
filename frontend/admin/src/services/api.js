@@ -696,6 +696,48 @@ export class ChatWebSocket {
   }
 }
 
+export const customOrdersAPI = {
+  getAll: async (skip = 0, limit = 100) => {
+    const response = await api.get('/custom-orders', {
+      params: { skip, limit }
+    });
+    return response.data;
+  },
+
+  updateStatus: async (orderId, status) => {
+    if (!orderId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid order ID');
+    }
+
+    const validStatuses = ['pending', 'processing', 'completed'];
+    if (!validStatuses.includes(status)) {
+      throw new Error('Invalid status');
+    }
+
+    const response = await api.patch(`/custom-orders/${orderId}/status`, { status });
+    return response.data;
+  },
+
+  delete: async (orderId) => {
+    if (!orderId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid order ID');
+    }
+
+    const response = await api.delete(`/custom-orders/${orderId}`);
+    return response.data;
+  },
+
+  bulkDelete: async (orderIds) => {
+    const response = await api.post('/custom-orders/bulk-delete', { order_ids: orderIds });
+    return response.data;
+  },
+
+  getUnreadCount: async () => {
+    const response = await api.get('/custom-orders/unread-count');
+    return response.data;
+  }
+};
+
 export const botAPI = {
   // Messages
   getMessages: async (category = null) => {

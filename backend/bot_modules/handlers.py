@@ -983,3 +983,152 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
         )
     
     user_states[user_id] = None
+    
+async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    
+    if update.message.text == '/request':
+        await update.message.reply_text(
+            "❌ *PRODUCT REQUEST*\n\n"
+            "You forgot to tell us what you want, genius.\n\n"
+            "Usage: `/request product name`\n"
+            "Example: `/request BCAA monohydrate`\n\n"
+            "Pro tip: Be specific or we'll send you sugar pills.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    product_text = update.message.text.replace('/request', '').strip()
+    
+    if not product_text:
+        await update.message.reply_text(
+            "❌ Empty request? That's like ordering air. Try again with actual products.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    from bot_modules.custom_orders import create_custom_order
+    
+    result = await create_custom_order(
+        telegram_id=user.id,
+        username=user.username,
+        product_text=product_text,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
+    if result.get("error") == "limit_reached":
+        await update.message.reply_text(
+            "❌ Chill bro, this ain't a buffet. Max 3 requests, not an all-you-can-spam special.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    messages = [
+        f"✅ Request #{result['custom_id']} locked in. Admin will slide into your DMs faster than caffeine hits your bloodstream. Sit tight, champ.",
+        f"✅ Request #{result['custom_id']} received. Now don't spam like a crackhead on clen – one request is enough. Admin will hit you up soon."
+    ]
+    
+    await update.message.reply_text(
+        random.choice(messages),
+        parse_mode='Markdown'
+    )
+    
+    if update.effective_chat.type == 'private':
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message=f"/request {product_text}",
+            direction="incoming",
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+
+async def closerequest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    args = update.message.text.split()[1:] if len(update.message.text.split()) > 1 else []
+    
+    from bot_modules.custom_orders import cancel_custom_order, cancel_all_pending_orders, get_user_custom_orders
+    
+    if not args:
+        cancelled = await cancel_all_pending_orders(user.id)
+        if cancelled > 0:
+            await update.message.reply_text(
+                f"✅ Cancelled {cancelled} request(s). Congrats, you wasted everyone's time. Smash `/request` when you finally know what you want.",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                "❌ No pending requests to cancel. You're either organized or lazy.",
+                parse_mode='Markdown'
+            )
+        return
+    
+    cancelled_ids = []
+    for arg in args:
+        try:
+            custom_id = int(arg)
+            if await cancel_custom_order(user.id, custom_id):
+                cancelled_ids.append(custom_id)
+        except:
+            pass
+    
+    if cancelled_ids:
+        await update.message.reply_text(
+            f"✅ Cancelled request(s): {', '.join(map(str, cancelled_ids))}. Congrats, you wasted everyone's time. Smash `/request` when you finally know what you want.",
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Couldn't cancel those requests. Either they don't exist or they're not yours.",
+            parse_mode='Markdown'
+        )
+
+async def requests_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    
+    from bot_modules.custom_orders import get_user_custom_orders
+    
+    orders = await get_user_custom_orders(user.id)
+    
+    if not orders:
+        text = "📋 *YOUR PRODUCT REQUESTS*\n\n"
+        text += "No requests yet. Your wishlist is emptier than a natty's trophy cabinet.\n\n"
+        text += "Use `/request product_name` to request products!"
+    else:
+        text = "📋 *YOUR PRODUCT REQUESTS*\n" + "="*25 + "\n\n"
+        
+        status_emojis = {
+            "pending": "⏳",
+            "processing": "🔄",
+            "completed": "✅"
+        }
+        
+        for order in orders:
+            emoji = status_emojis.get(order['status'], "❓")
+            text += f"{emoji} *#{order['custom_id']}* - {order['status'].upper()}\n"
+            text += f"📦 {order['product_text'][:50]}{'...' if len(order['product_text']) > 50 else ''}\n"
+            text += f"📅 {order['created_at'].strftime('%d %b %Y %H:%M')}\n\n"
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🍕 Shop Now", callback_data="shop")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+    ])
+    
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    if update.effective_chat.type == 'private':
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message="/requests",
+            direction="incoming",
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message=text,
+            direction="outgoing"
+        )

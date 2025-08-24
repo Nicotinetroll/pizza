@@ -589,3 +589,60 @@ async def get_notification_logs(
                 pass
     
     return {"logs": logs, "total": len(logs)}
+
+@router_system.get("/api/custom-orders")
+async def get_custom_orders(
+    skip: int = 0,
+    limit: int = 100,
+    email: str = Depends(verify_token)
+):
+    from bot_modules.custom_orders import get_all_custom_orders
+    return await get_all_custom_orders(skip, limit)
+
+@router_system.patch("/api/custom-orders/{order_id}/status")
+async def update_custom_order_status(
+    order_id: str,
+    status_data: dict,
+    email: str = Depends(verify_token)
+):
+    from bot_modules.custom_orders import update_custom_order_status
+    status = status_data.get("status")
+    if not status:
+        raise HTTPException(status_code=400, detail="Status required")
+    
+    success = await update_custom_order_status(order_id, status)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update status")
+    
+    return {"success": True, "message": "Status updated"}
+
+@router_system.delete("/api/custom-orders/{order_id}")
+async def delete_custom_order(
+    order_id: str,
+    email: str = Depends(verify_token)
+):
+    from bot_modules.custom_orders import delete_custom_order
+    success = await delete_custom_order(order_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    return {"message": "Order deleted"}
+
+@router_system.post("/api/custom-orders/bulk-delete")
+async def bulk_delete_custom_orders(
+    data: dict,
+    email: str = Depends(verify_token)
+):
+    from bot_modules.custom_orders import bulk_delete_custom_orders
+    order_ids = data.get("order_ids", [])
+    if not order_ids:
+        raise HTTPException(status_code=400, detail="No orders selected")
+    
+    deleted = await bulk_delete_custom_orders(order_ids)
+    return {"message": f"Deleted {deleted} orders"}
+
+@router_system.get("/api/custom-orders/unread-count")
+async def get_unread_custom_orders(email: str = Depends(verify_token)):
+    from bot_modules.custom_orders import get_pending_count
+    count = await get_pending_count()
+    return {"count": count}
