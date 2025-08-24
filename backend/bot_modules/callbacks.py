@@ -3,6 +3,7 @@ Enhanced callback query handler with categories and notifications
 """
 import asyncio
 import secrets
+import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
@@ -23,6 +24,8 @@ from .keyboards import (
 )
 from .config import MESSAGES, CRYPTO_CURRENCIES
 from .public_notifications import public_notifier
+
+logger = logging.getLogger(__name__)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all callback queries with improved flow"""
@@ -98,6 +101,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data.startswith("fake_pay_"):
         await handle_fake_payment(update, context, data)
+    
+    elif data.startswith("check_pay_"):
+        await handle_check_payment(update, context, data)
     
     elif data == "payment_help":
         await show_payment_help(update, context)
@@ -290,7 +296,7 @@ async def handle_skip_referral(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_data: str):
-    """Process payment selection WITHOUT sending notification yet"""
+    """Process REAL payment with NOWPayments"""
     query = update.callback_query
     payment_method = payment_data.replace("pay_", "").upper()
     
@@ -302,15 +308,13 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     referral_code = context.user_data.get('referral_code')
     discount_amount = context.user_data.get('discount_amount', 0)
     
-    # Generate fake payment address for demo
-    fake_addresses = {
-        "BTC": "bc1q" + secrets.token_hex(20),
-        "ETH": "0x" + secrets.token_hex(20),
-        "SOL": "So" + secrets.token_hex(22),
-        "USDT": "TT" + secrets.token_hex(17)
-    }
+    # Show processing message
+    await query.edit_message_text(
+        "⏳ *Creating payment...*\n\nGenerating your payment address...",
+        parse_mode='Markdown'
+    )
     
-    # Create order
+    # Create order in database first
     order_items = []
     for product_id, item in cart.items():
         order_items.append({
@@ -330,7 +334,6 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
         "discount_amount": discount_amount,
         "payment": {
             "method": payment_method,
-            "address": fake_addresses.get(payment_method, "DEMO_ADDRESS"),
             "amount_usdt": total,
             "status": "pending"
         },
@@ -338,36 +341,208 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     }
     
     order_id = await create_order(order_data)
+    order = await get_order_by_id(order_id)
     
-    # DON'T SEND NOTIFICATION HERE - REMOVED!
-    # asyncio.create_task(public_notifier.send_notification(order_data))
+    # Try to import payment gateway
+    payment_gateway = None
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from nowpayments_gateway import payment_gateway as pg
+        payment_gateway = pg
+    except ImportError as e:
+        logger.warning(f"NOWPayments gateway not available: {e}")
     
-    # Apply referral code usage
-    if referral_code:
-        await apply_referral_code(referral_code)
+    if payment_gateway:
+        # Create REAL payment with NOWPayments
+        payment_request = {
+            "order_id": str(order_id),
+            "order_number": order['order_number'],
+            "amount_usd": total,
+            "currency": payment_method,
+            "telegram_id": user_id,
+            "description": f"AnabolicPizza Order {order['order_number']}"
+        }
+        
+        payment_result = await payment_gateway.create_payment(payment_request)
+        
+        if payment_result.get("success"):
+            # Update order with payment details
+            await update_order_payment_details(order_id, {
+                "payment_id": payment_result["payment_id"],
+                "pay_address": payment_result["pay_address"],
+                "pay_amount": payment_result["pay_amount"],
+                "pay_currency": payment_result["pay_currency"]
+            })
+            
+            # Clear cart
+            cart_manager.clear_cart(user_id)
+            
+            # Apply referral code if used
+            if referral_code:
+                await apply_referral_code(referral_code)
+            
+            # Format payment instructions
+            payment_text = f"""
+💰 *PAYMENT INSTRUCTIONS*
+
+Order: `{order['order_number']}`
+Amount: **${total:.2f}**
+
+━━━━━━━━━━━━━━━━━━━━━
+
+📍 *Send EXACTLY this amount:*
+**{payment_result['pay_amount']:.8f} {payment_result['pay_currency']}**
+
+📬 *To this address:*
+`{payment_result['pay_address']}`
+
+━━━━━━━━━━━━━━━━━━━━━
+
+⏱️ *Payment expires in 20 minutes*
+
+⚠️ **IMPORTANT:**
+• Send the EXACT amount shown
+• Payment will be confirmed automatically
+• DO NOT close this chat until confirmed
+
+🔄 *Status:* Waiting for payment...
+"""
+            
+            # Create keyboard with payment status check
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_result['payment_id']}")],
+                [InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_order")],
+                [InlineKeyboardButton("❓ Need Help?", callback_data="payment_help")]
+            ])
+            
+            await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
+            
+            # Start background task to check payment status
+            asyncio.create_task(
+                auto_check_payment_status(
+                    context.bot,
+                    user_id,
+                    payment_result['payment_id'],
+                    order['order_number']
+                )
+            )
+            
+        else:
+            # Payment creation failed
+            error_text = f"""
+❌ *Payment Creation Failed*
+
+{payment_result.get('error', 'Unknown error')}
+
+Please try again or contact support.
+"""
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Try Again", callback_data="checkout_start")],
+                [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+            ])
+            
+            await query.edit_message_text(error_text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    else:
+        # Fallback to demo mode if gateway not configured
+        await handle_demo_payment(update, context, payment_method, order, order_id, total)
+
+async def handle_demo_payment(update, context, payment_method, order, order_id, total):
+    """Fallback demo payment for testing"""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    
+    # Generate fake addresses for demo
+    fake_addresses = {
+        "BTC": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+        "ETH": "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        "SOL": "7UX2i7SucgLMQcfZ75s3VXmZZY4YRUyJN9X1RgfMoDUi",
+        "USDT": "TN5jgpFtWvLhvER4WYeWPWhjLZiATLqN9b"
+    }
+    
+    # Update order with fake address
+    from .database import db
+    from bson import ObjectId
+    await db.orders.update_one(
+        {"_id": ObjectId(order_id)},
+        {
+            "$set": {
+                "payment.address": fake_addresses.get(payment_method, "DEMO_ADDRESS")
+            }
+        }
+    )
     
     # Clear cart
     cart_manager.clear_cart(user_id)
     
-    # Get order for display
-    order = await get_order_by_id(order_id)
+    # Apply referral code if used
+    if context.user_data.get('referral_code'):
+        await apply_referral_code(context.user_data['referral_code'])
     
     # Calculate crypto amount
     crypto_info = CRYPTO_CURRENCIES.get(payment_method, {"rate": 1})
     crypto_amount = total / crypto_info["rate"]
     
-    payment_text = MESSAGES["payment_instructions"].format(
-        order_number=order['order_number'],
-        total=total,
-        crypto_amount=crypto_amount,
-        currency=payment_method,
-        address=fake_addresses.get(payment_method)
-    )
+    # Demo payment text
+    demo_text = f"""
+⚠️ *DEMO MODE - Testing Only*
+
+Order: `{order['order_number']}`
+Amount: **${total:.2f}** ({crypto_amount:.8f} {payment_method})
+
+Send to this address:
+`{fake_addresses.get(payment_method)}`
+
+━━━━━━━━━━━━━━━━━━━━━
+
+_This is a demo. Click below to simulate payment._
+"""
     
-    payment_text += "\n\n_[Demo Mode - Click below to simulate payment]_"
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎮 Simulate Payment", callback_data=f"fake_pay_{order_id}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="home")]
+    ])
     
-    keyboard = get_payment_simulation_keyboard(order_id)
-    await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
+    await query.edit_message_text(demo_text, reply_markup=keyboard, parse_mode='Markdown')
+
+async def handle_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    """Handle manual payment status check"""
+    query = update.callback_query
+    payment_id = data.replace("check_pay_", "")
+    
+    await query.answer("Checking payment status...", show_alert=False)
+    
+    # Try to check with NOWPayments
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from nowpayments_gateway import payment_gateway
+        
+        if payment_gateway:
+            status = await payment_gateway.check_payment_status(payment_id)
+            
+            if status and status.get("payment_status") == "finished":
+                await query.edit_message_text(
+                    "✅ *Payment Confirmed!*\n\nYour order is being processed!",
+                    parse_mode='Markdown',
+                    reply_markup=get_order_complete_keyboard()
+                )
+            elif status and status.get("payment_status") == "partially_paid":
+                await query.answer(
+                    f"⚠️ Partial payment received. Still waiting for full amount.",
+                    show_alert=True
+                )
+            else:
+                await query.answer(
+                    "⏳ Payment not yet confirmed. Please wait...",
+                    show_alert=True
+                )
+    except:
+        await query.answer("Unable to check payment status", show_alert=True)
 
 async def handle_fake_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
     """Handle simulated payment for demo with notification ONLY after confirmation"""
@@ -459,4 +634,147 @@ async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE
             [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
         ]),
         parse_mode='Markdown'
+    )
+
+async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, order_number: str):
+    """
+    Background task to automatically check payment status
+    Checks every 30 seconds for up to 20 minutes
+    """
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from nowpayments_gateway import payment_gateway
+    except:
+        logger.warning("Payment gateway not available for auto-check")
+        return
+    
+    if not payment_gateway:
+        return
+    
+    max_checks = 40  # 20 minutes / 30 seconds
+    check_interval = 30  # seconds
+    
+    for i in range(max_checks):
+        await asyncio.sleep(check_interval)
+        
+        try:
+            status = await payment_gateway.check_payment_status(payment_id)
+            
+            if status and status.get("payment_status") == "finished":
+                # Payment confirmed!
+                success_text = f"""
+✅ *PAYMENT CONFIRMED!*
+
+Order: `{order_number}`
+
+Your payment has been successfully received!
+
+Your order is now being processed and will be shipped within 24 hours.
+
+Thank you for your order! 💪🚀
+"""
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📦 View My Orders", callback_data="orders")],
+                    [InlineKeyboardButton("🍕 Order More", callback_data="shop")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+                ])
+                
+                await bot.send_message(
+                    chat_id=telegram_id,
+                    text=success_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+                break
+                
+            elif status and status.get("payment_status") == "partially_paid":
+                # Partial payment
+                actually_paid = status.get("actually_paid", 0)
+                expected = status.get("pay_amount", 0)
+                remaining = expected - actually_paid
+                
+                partial_text = f"""
+⚠️ *PARTIAL PAYMENT DETECTED*
+
+Received: {actually_paid:.8f}
+Expected: {expected:.8f}
+**Still need: {remaining:.8f}**
+
+Please send the remaining amount to complete your order.
+"""
+                await bot.send_message(
+                    chat_id=telegram_id,
+                    text=partial_text,
+                    parse_mode='Markdown'
+                )
+                
+            elif status and status.get("payment_status") == "expired":
+                # Payment expired
+                expired_text = f"""
+❌ *PAYMENT EXPIRED*
+
+Order: `{order_number}`
+
+Your payment window has expired.
+Please create a new order if you still want to purchase.
+"""
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Create New Order", callback_data="shop")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+                ])
+                
+                await bot.send_message(
+                    chat_id=telegram_id,
+                    text=expired_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+                break
+                
+        except Exception as e:
+            logger.error(f"Error checking payment status: {e}")
+    
+    # If we get here, payment wasn't confirmed in 20 minutes
+    if i == max_checks - 1:
+        timeout_text = f"""
+⏰ *PAYMENT TIMEOUT*
+
+Order: `{order_number}`
+
+We haven't received your payment within the time limit.
+Your order has been cancelled.
+
+If you've already sent the payment, please contact support with your transaction ID.
+"""
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
+            [InlineKeyboardButton("🔄 Try Again", callback_data="shop")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+        ])
+        
+        await bot.send_message(
+            chat_id=telegram_id,
+            text=timeout_text,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+
+# Helper function to update order payment details
+async def update_order_payment_details(order_id: str, payment_details: dict):
+    """Update order with NOWPayments payment details"""
+    from .database import db
+    from bson import ObjectId
+    
+    await db.orders.update_one(
+        {"_id": ObjectId(order_id)},
+        {
+            "$set": {
+                "payment.payment_id": payment_details.get("payment_id"),
+                "payment.address": payment_details.get("pay_address"),
+                "payment.amount_crypto": payment_details.get("pay_amount"),
+                "payment.currency": payment_details.get("pay_currency")
+            }
+        }
     )
