@@ -1,5 +1,5 @@
 """
-Enhanced callback query handler with single-message payment flow
+Enhanced callback query handler with smooth animated payment status
 """
 import asyncio
 import secrets
@@ -9,6 +9,17 @@ from telegram.ext import ContextTypes
 from pathlib import Path
 import os
 import sys
+from datetime import datetime
+
+# Import the new message updater for smooth animations
+try:
+    from .message_updater import message_updater, status_animator
+    ANIMATION_SUPPORT = True
+except ImportError:
+    ANIMATION_SUPPORT = False
+    message_updater = None
+    status_animator = None
+    logging.getLogger(__name__).warning("Animation support not available - message_updater.py not found")
 
 from .handlers import (
     start_command, show_categories, show_category_products, show_product_detail,
@@ -105,8 +116,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💬 Telegram: @APizzaSupport
 
 *Response Time:*
-• Orders/Payment: 1-2 hours
-• General: 6-12 hours
+- Orders/Payment: 1-2 hours
+- General: 6-12 hours
 
 Include your order number when contacting!
 
@@ -316,8 +327,6 @@ async def handle_skip_referral(update: Update, context: ContextTypes.DEFAULT_TYP
     
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
-# backend/bot_modules/callbacks.py - REPLACE the handle_payment function
-
 async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_data: str):
     query = update.callback_query
     payment_method = payment_data.replace("pay_", "").upper()
@@ -479,9 +488,9 @@ Amount: **${total:.2f}**
 ⏱️ *Expires in 20 minutes*
 
 ⚠️ **IMPORTANT:**
-• Send the EXACT amount shown
-• Payment confirms automatically
-• Keep this chat open
+- Send the EXACT amount shown
+- Payment confirms automatically
+- Keep this chat open
 
 ⏳ *Status:* Waiting for payment...
 """
@@ -499,15 +508,27 @@ Amount: **${total:.2f}**
                 message_id = query.message.message_id
                 
                 # Start auto-check with animated status updates
-                asyncio.create_task(
-                    auto_check_payment_status(
-                        context.bot,
-                        user_id,
-                        payment_result['payment_id'],
-                        order['order_number'],
-                        message_id
+                if ANIMATION_SUPPORT and message_updater and status_animator:
+                    asyncio.create_task(
+                        auto_check_payment_status(
+                            context.bot,
+                            user_id,
+                            payment_result['payment_id'],
+                            order['order_number'],
+                            message_id
+                        )
                     )
-                )
+                else:
+                    # Fallback to simple checking without animations
+                    asyncio.create_task(
+                        auto_check_payment_status_simple(
+                            context.bot,
+                            user_id,
+                            payment_result['payment_id'],
+                            order['order_number'],
+                            message_id
+                        )
+                    )
                 return
                 
             else:
@@ -601,9 +622,9 @@ Order: `{order_number}`
 Your payment has been successfully received! 🎉
 
 *What happens next:*
-• Order is being processed
-• Shipping within 24 hours
-• You'll receive tracking info
+- Order is being processed
+- Shipping within 24 hours
+- You'll receive tracking info
 
 Thank you for your order! 💪🚀
 
@@ -643,16 +664,16 @@ async def show_payment_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 5. Wait for blockchain confirmation
 
 *Important Tips:*
-• Send the exact amount for automatic processing
-• Payments expire after 30 minutes
-• Confirmations usually take 5-15 minutes
-• We'll notify you once confirmed
+- Send the exact amount for automatic processing
+- Payments expire after 30 minutes
+- Confirmations usually take 5-15 minutes
+- We'll notify you once confirmed
 
 *Supported Currencies:*
-• Bitcoin (BTC) - min $5
-• Ethereum (ETH) - min $15
-• Solana (SOL) - min $2
-• Tether (USDT) - min $1
+- Bitcoin (BTC) - min $5
+- Ethereum (ETH) - min $15
+- Solana (SOL) - min $2
+- Tether (USDT) - min $1
 
 Need more help? Contact support!
 """
@@ -682,46 +703,54 @@ async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, order_number: str, message_id: int = None):
-    """Auto check payment status with real-time updates and animated dots"""
+    """Payment status checker with ultra-smooth animations"""
+    
+    if not ANIMATION_SUPPORT or not message_updater or not status_animator:
+        # Fallback to simple checking
+        await auto_check_payment_status_simple(bot, telegram_id, payment_id, order_number, message_id)
+        return
+    
     try:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from nowpayments_gateway import payment_gateway
         from .database import db
         from telegram import InlineKeyboardMarkup, InlineKeyboardButton
     except Exception as e:
-        logger.warning(f"Payment gateway not available for auto-check: {e}")
+        logger.warning(f"Payment gateway not available: {e}")
         return
     
     if not payment_gateway:
-        logger.warning("Payment gateway is None")
         return
     
-    max_time = 1200  # 20 minutes total
-    check_interval = 15  # Check API every 15 seconds
+    # Configuration
+    max_time = 1200  # 20 minutes
+    api_check_interval = 5  # Check API every 5 seconds
+    animation_fps = 2  # Updates per second for smooth animation
+    animation_interval = 1.0 / animation_fps
+    
     elapsed_time = 0
+    last_api_check = -api_check_interval
     already_notified = False
+    current_status = "waiting"
     last_status = "waiting"
-    dot_count = 0
-    last_api_check = -1  # Force first check immediately
+    status_data = None
     
-    # Get payment details once at start
-    payment_details = None
-    price_amount = 0
+    # Get payment details
+    order = await db.orders.find_one({"order_number": order_number})
+    if not order:
+        return
     
-    try:
-        order = await db.orders.find_one({"order_number": order_number})
-        if order and order.get("payment"):
-            payment_details = {
-                "address": order["payment"].get("address", order["payment"].get("pay_address", "")),
-                "amount": order["payment"].get("amount_crypto", order["payment"].get("pay_amount", 0)),
-                "currency": order["payment"].get("currency", order["payment"].get("pay_currency", ""))
-            }
-            price_amount = float(order.get("total_usdt", 0))
-            logger.info(f"Got payment details for {order_number}: {payment_details}")
-    except Exception as e:
-        logger.error(f"Error getting payment details: {e}")
+    payment_details = {
+        "address": order["payment"].get("pay_address", order["payment"].get("address", "")),
+        "amount": order["payment"].get("pay_amount", order["payment"].get("amount_crypto", 0)),
+        "currency": order["payment"].get("pay_currency", order["payment"].get("currency", ""))
+    }
+    price_amount = float(order.get("total_usdt", 0))
     
-    # Keyboard for all status updates
+    # Animation key for this payment
+    animation_key = f"payment_{payment_id}"
+    
+    # Keyboard
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_id}")],
         [
@@ -730,62 +759,69 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
         ]
     ])
     
-    # Main loop - runs every second
+    # Status configurations
+    status_messages = {
+        "waiting": "Waiting for payment",
+        "confirming": "Payment detected! Confirming",
+        "confirmed": "Payment confirmed! Processing",
+        "sending": "Processing your order",
+        "partially_paid": "Partial payment received",
+        "finished": "PAYMENT COMPLETE",
+        "failed": "Payment failed",
+        "expired": "Payment expired"
+    }
+    
+    status_emojis = {
+        "waiting": "⏳",
+        "confirming": "🔄",
+        "confirmed": "✔️",
+        "sending": "📤",
+        "partially_paid": "⚠️",
+        "finished": "✅",
+        "failed": "❌",
+        "expired": "⏰"
+    }
+    
+    # Main loop
     while elapsed_time < max_time and not already_notified:
-        # Check API every 15 seconds (or immediately on first run)
-        current_status = last_status
-        status_data = None
         
-        if elapsed_time - last_api_check >= check_interval:
+        # Check API periodically
+        if elapsed_time - last_api_check >= api_check_interval:
             try:
-                logger.info(f"Checking payment status for {payment_id}")
                 status_data = await payment_gateway.check_payment_status(payment_id)
+                
                 if status_data:
-                    current_status = status_data.get("payment_status", "waiting")
-                    if current_status != last_status:
-                        logger.info(f"Payment status changed for {order_number}: {last_status} -> {current_status}")
-                    last_status = current_status
+                    new_status = status_data.get("payment_status", "waiting")
+                    
+                    if new_status != last_status:
+                        logger.info(f"Status changed: {last_status} -> {new_status}")
+                        status_animator.reset(animation_key)  # Reset animation on status change
+                        last_status = new_status
+                    
+                    current_status = new_status
                     last_api_check = elapsed_time
+                    
             except Exception as e:
-                logger.error(f"Error checking payment status: {e}")
+                logger.error(f"API check error: {e}")
         
-        # Update dots animation every second
-        dot_count = (dot_count % 5) + 1
-        dots = "." * dot_count
+        # Get animation frame
+        dots = status_animator.get_frame("dots", animation_key)
         
-        # Status mapping with animated dots
-        status_map = {
-            "waiting": ("⏳", f"Waiting for payment{dots}"),
-            "confirming": ("🔄", f"Payment detected! Confirming{dots}"),
-            "confirmed": ("🔄", f"Payment confirmed! Processing{dots}"),
-            "sending": ("📤", f"Processing payment{dots}"),
-            "partially_paid": ("⚠️", f"Partial payment received{dots}"),
-            "finished": ("✅", "PAYMENT CONFIRMED!"),
-            "failed": ("❌", "Payment failed"),
-            "expired": ("⏰", "Payment expired"),
-            "refunded": ("↩️", "Payment refunded")
-        }
-        
-        emoji, status_text = status_map.get(current_status, ("❓", f"{current_status}{dots}"))
-        
-        # Calculate time remaining
+        # Calculate remaining time
         time_remaining = max(0, 20 - (elapsed_time // 60))
         
-        # Update message every second (except for finished states)
-        if message_id and current_status not in ["finished", "failed", "expired", "refunded"]:
-            # Build dynamic payment message
-            update_text = f"""
-💰 *PAYMENT INSTRUCTIONS*
+        # Build message
+        message_text = f"""💰 *PAYMENT INSTRUCTIONS*
 
 Order: `{order_number}`
 Amount: **${price_amount:.2f}**
 
-━━━━━━━━━━━━━━━━━━━━━
-"""
-            
-            # Show payment details if still waiting or confirming
-            if payment_details and current_status in ["waiting", "confirming"]:
-                update_text += f"""
+━━━━━━━━━━━━━━━━━━━━━"""
+        
+        # Add payment details for active states
+        if current_status in ["waiting", "confirming", "partially_paid"]:
+            message_text += f"""
+
 📍 *Send EXACTLY this amount:*
 `{payment_details['amount']:.8f}` {payment_details['currency']}
 
@@ -794,68 +830,59 @@ Amount: **${price_amount:.2f}**
 
 ━━━━━━━━━━━━━━━━━━━━━
 
-👆 *Tap the address or amount above to copy!*
-
-⏱️ *Expires in {time_remaining} minutes*
-
-⚠️ **IMPORTANT:**
-• Send the EXACT amount shown
-• Payment confirms automatically
-• Keep this chat open
-
-"""
-            
-            # Always show the animated status line
-            update_text += f"{emoji} *Status:* {status_text}"
-            
-            # Show additional info based on status
-            if current_status == "confirming" and status_data:
-                confirmations = status_data.get("confirmations", 0)
-                required = status_data.get("confirmations_required", 1)
-                if confirmations > 0:
-                    update_text += f"\n🔗 *Confirmations:* {confirmations}/{required}"
-            
-            elif current_status == "partially_paid" and status_data:
-                actually_paid = float(status_data.get("actually_paid", 0))
-                expected = float(status_data.get("pay_amount", 0))
-                remaining = expected - actually_paid
-                update_text += f"\n💳 *Received:* {actually_paid:.8f}"
-                update_text += f"\n⚠️ *Still needed:* {remaining:.8f}"
-            
-            # Update message
-            try:
-                await bot.edit_message_text(
-                    chat_id=telegram_id,
-                    message_id=message_id,
-                    text=update_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
-            except Exception as e:
-                # Only log if it's not the "message not modified" error
-                if "message is not modified" not in str(e).lower():
-                    logger.debug(f"Could not update message: {e}")
+⏱️ *Expires in {time_remaining} minutes*"""
         
-        # Handle payment completion states
+        # Add status line with animation
+        emoji = status_emojis.get(current_status, "❓")
+        status_text = status_messages.get(current_status, current_status)
+        message_text += f"\n\n{emoji} *Status:* {status_text}{dots}"
+        
+        # Additional status-specific info
+        if current_status == "confirming" and status_data:
+            confirmations = status_data.get("confirmations", 0)
+            required = status_data.get("confirmations_required", 1)
+            if confirmations > 0:
+                progress_bar = "▓" * confirmations + "░" * (required - confirmations)
+                message_text += f"\n🔗 Confirmations: [{progress_bar}] {confirmations}/{required}"
+        
+        elif current_status == "partially_paid" and status_data:
+            paid = float(status_data.get("actually_paid", 0))
+            total = float(status_data.get("pay_amount", 0))
+            percent = (paid / total * 100) if total > 0 else 0
+            message_text += f"\n💳 Received: {percent:.1f}% ({paid:.8f}/{total:.8f})"
+        
+        # Update message using smooth updater
+        if message_id and current_status not in ["finished", "failed", "expired"]:
+            await message_updater.update_message(
+                bot=bot,
+                chat_id=telegram_id,
+                message_id=message_id,
+                text=message_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+        
+        # Handle terminal states
         if current_status == "finished" and not already_notified:
             already_notified = True
             
-            success_text = f"""
-✅ *PAYMENT CONFIRMED!*
+            # Clear cache for final update
+            message_updater.clear_message_cache(telegram_id, message_id)
+            
+            success_text = f"""✅ *PAYMENT CONFIRMED!*
 
 Order: `{order_number}`
 
 Your payment has been successfully received! 🎉
 
 *What happens next:*
-• Order is being processed
-• Shipping within 24 hours  
-• You'll receive tracking info
+- Order is being processed
+- Shipping within 24 hours
+- You'll receive tracking info
 
-Thank you for your order! 💪
+Thank you for your order! 💪🚀
 
-_Time to get massive! Your gains are on the way!_ 🍕💉
-"""
+_Time to get massive! Your gains are on the way!_ 🍕💉"""
             
             success_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📦 My Orders", callback_data="orders")],
@@ -863,110 +890,83 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                 [InlineKeyboardButton("🍕 Order More", callback_data="shop")]
             ])
             
-            if message_id:
-                try:
-                    await bot.edit_message_text(
-                        chat_id=telegram_id,
-                        message_id=message_id,
-                        text=success_text,
-                        reply_markup=success_keyboard,
-                        parse_mode='Markdown'
-                    )
-                except Exception as e:
-                    logger.error(f"Could not update to success message: {e}")
-                    await bot.send_message(
-                        chat_id=telegram_id,
-                        text=success_text,
-                        reply_markup=success_keyboard,
-                        parse_mode='Markdown'
-                    )
+            await message_updater.update_message(
+                bot=bot,
+                chat_id=telegram_id,
+                message_id=message_id,
+                text=success_text,
+                reply_markup=success_keyboard,
+                parse_mode='Markdown',
+                force=True  # Force update for final message
+            )
             
-            logger.info(f"✅ Payment auto-confirmed for {order_number}")
+            logger.info(f"✅ Payment confirmed: {order_number}")
             break
         
-        elif current_status == "expired" and not already_notified:
+        elif current_status in ["failed", "expired"] and not already_notified:
             already_notified = True
             
-            expired_text = f"""
-❌ *PAYMENT EXPIRED*
-
-Order: `{order_number}`
-
-The payment window has expired.
-Please create a new order to continue.
-"""
-            expired_keyboard = InlineKeyboardMarkup([
+            message_updater.clear_message_cache(telegram_id, message_id)
+            
+            if current_status == "expired":
+                final_text = "⏰ *PAYMENT EXPIRED*\n\nThe payment window has expired."
+            else:
+                final_text = "❌ *PAYMENT FAILED*\n\nThe payment could not be processed."
+            
+            final_text += f"\n\nOrder: `{order_number}`\n\nPlease try again or contact support."
+            
+            final_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
                 [InlineKeyboardButton("💬 Support", callback_data="support")],
                 [InlineKeyboardButton("🏠 Menu", callback_data="home")]
             ])
             
-            if message_id:
-                try:
-                    await bot.edit_message_text(
-                        chat_id=telegram_id,
-                        message_id=message_id,
-                        text=expired_text,
-                        reply_markup=expired_keyboard,
-                        parse_mode='Markdown'
-                    )
-                except:
-                    pass
+            await message_updater.update_message(
+                bot=bot,
+                chat_id=telegram_id,
+                message_id=message_id,
+                text=final_text,
+                reply_markup=final_keyboard,
+                parse_mode='Markdown',
+                force=True
+            )
             break
         
-        elif current_status == "failed" and not already_notified:
-            already_notified = True
-            
-            failed_text = f"""
-❌ *PAYMENT FAILED*
-
-Order: `{order_number}`
-
-The payment could not be processed.
-Please try again or contact support.
-"""
-            failed_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Try Again", callback_data="shop")],
-                [InlineKeyboardButton("💬 Support", callback_data="support")],
-                [InlineKeyboardButton("🏠 Menu", callback_data="home")]
-            ])
-            
-            if message_id:
-                try:
-                    await bot.edit_message_text(
-                        chat_id=telegram_id,
-                        message_id=message_id,
-                        text=failed_text,
-                        reply_markup=failed_keyboard,
-                        parse_mode='Markdown'
-                    )
-                except:
-                    pass
-            break
-        
-        # Wait 1 second before next update
-        await asyncio.sleep(1)
-        elapsed_time += 1
+        # Wait for next frame
+        await asyncio.sleep(animation_interval)
+        elapsed_time += animation_interval
+    
+    # Cleanup
+    if ANIMATION_SUPPORT:
+        message_updater.clear_message_cache(telegram_id, message_id)
+        status_animator.reset(animation_key)
     
     # Timeout handling
     if elapsed_time >= max_time and not already_notified:
-        timeout_text = f"""
-⏰ *CHECKING TIMEOUT*
+        timeout_text = f"""⏰ *TIMEOUT*
 
 Order: `{order_number}`
 
-We're still waiting for your payment.
-If you've sent it, it may take longer due to network congestion.
+Payment checking timed out. If you've sent the payment, it may still be processing.
 
-Contact support if you need help.
-"""
+Please contact support for assistance."""
+        
         timeout_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
-            [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
+            [InlineKeyboardButton("💬 Support", callback_data="support")],
             [InlineKeyboardButton("🏠 Menu", callback_data="home")]
         ])
         
-        if message_id:
+        if ANIMATION_SUPPORT:
+            await message_updater.update_message(
+                bot=bot,
+                chat_id=telegram_id,
+                message_id=message_id,
+                text=timeout_text,
+                reply_markup=timeout_keyboard,
+                parse_mode='Markdown',
+                force=True
+            )
+        else:
             try:
                 await bot.edit_message_text(
                     chat_id=telegram_id,
@@ -978,6 +978,63 @@ Contact support if you need help.
             except:
                 pass
 
+async def auto_check_payment_status_simple(bot, telegram_id: int, payment_id: str, order_number: str, message_id: int = None):
+    """Simple payment status checker without animations (fallback)"""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from nowpayments_gateway import payment_gateway
+        from .database import db
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+    except Exception as e:
+        logger.warning(f"Payment gateway not available: {e}")
+        return
+    
+    if not payment_gateway:
+        return
+    
+    max_time = 1200
+    check_interval = 10
+    elapsed_time = 0
+    
+    while elapsed_time < max_time:
+        try:
+            status = await payment_gateway.check_payment_status(payment_id)
+            
+            if status and status.get("payment_status") == "finished":
+                success_text = f"""✅ *PAYMENT CONFIRMED!*
+
+Order: `{order_number}`
+
+Your payment has been successfully received! 🎉
+
+Thank you for your order! 💪🚀"""
+                
+                success_keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📦 My Orders", callback_data="orders")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+                ])
+                
+                if message_id:
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=telegram_id,
+                            message_id=message_id,
+                            text=success_text,
+                            reply_markup=success_keyboard,
+                            parse_mode='Markdown'
+                        )
+                    except:
+                        pass
+                
+                logger.info(f"✅ Payment confirmed: {order_number}")
+                break
+                
+        except Exception as e:
+            logger.error(f"Error checking payment: {e}")
+        
+        await asyncio.sleep(check_interval)
+        elapsed_time += check_interval
+
 async def update_order_payment_details(order_id: str, payment_details: dict, message_id: int = None):
     from .database import db
     from bson import ObjectId
@@ -985,8 +1042,11 @@ async def update_order_payment_details(order_id: str, payment_details: dict, mes
     update_data = {
         "payment.payment_id": payment_details.get("payment_id"),
         "payment.address": payment_details.get("pay_address"),
+        "payment.pay_address": payment_details.get("pay_address"),
         "payment.amount_crypto": payment_details.get("pay_amount"),
-        "payment.currency": payment_details.get("pay_currency")
+        "payment.pay_amount": payment_details.get("pay_amount"),
+        "payment.currency": payment_details.get("pay_currency"),
+        "payment.pay_currency": payment_details.get("pay_currency")
     }
     
     if message_id:

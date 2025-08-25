@@ -1,6 +1,6 @@
 """
 NOWPayments Integration for AnabolicPizza Bot
-Complete payment gateway with message editing support
+Complete payment gateway with message editing support and smooth animations
 """
 
 import aiohttp
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class NOWPaymentsGateway:
-    """NOWPayments API integration handler"""
+    """NOWPayments API integration handler with optimized caching"""
     
     def __init__(self, api_key: str, ipn_secret: str, sandbox: bool = False):
         self.api_key = api_key
@@ -201,16 +201,26 @@ class NOWPaymentsGateway:
             }
     
     async def check_payment_status(self, payment_id: str) -> Dict:
-        """Check payment status - USED BY BOT FOR POLLING"""
+        """Check payment status with intelligent caching for smooth animations"""
         try:
-            # First check database for cached status
+            # Check database for cached status
             cached = await self.db.payment_records.find_one({"payment_id": payment_id})
+            
             if cached:
-                # If last check was less than 3 seconds ago, return cached
+                # For rapid polling, use very short cache (1 second)
+                # This allows smooth animations while reducing API calls
+                cache_duration = 1  # seconds
+                
                 if cached.get("last_check"):
                     time_diff = (datetime.utcnow() - cached["last_check"]).total_seconds()
-                    if time_diff < 3:
-                        logger.info(f"Returning cached status for {payment_id}: {cached.get('payment_status')}")
+                    
+                    # If status is terminal (finished/failed/expired), use longer cache
+                    terminal_statuses = ["finished", "failed", "expired", "refunded"]
+                    if cached.get("payment_status") in terminal_statuses:
+                        cache_duration = 60  # 1 minute for terminal statuses
+                    
+                    # Return cached if within cache duration
+                    if time_diff < cache_duration:
                         return {
                             "payment_id": payment_id,
                             "payment_status": cached.get("payment_status", "waiting"),
@@ -218,7 +228,10 @@ class NOWPaymentsGateway:
                             "pay_amount": float(cached.get("pay_amount", 0)),
                             "outcome_amount": float(cached.get("outcome_amount", 0)),
                             "outcome_currency": cached.get("outcome_currency", "USD"),
-                            "from_cache": True
+                            "confirmations": cached.get("confirmations", 0),
+                            "confirmations_required": cached.get("confirmations_required", 1),
+                            "from_cache": True,
+                            "cache_age": time_diff
                         }
             
             # Make API call
@@ -230,20 +243,36 @@ class NOWPaymentsGateway:
                     if response.status == 200:
                         data = await response.json()
                         
+                        # Extract blockchain confirmation info if available
+                        confirmations = 0
+                        confirmations_required = 1
+                        
+                        # NOWPayments specific fields
+                        if "confirmations" in data:
+                            confirmations = int(data["confirmations"])
+                        if "confirmations_needed" in data:
+                            confirmations_required = int(data["confirmations_needed"])
+                        
                         # Update database with new status
+                        update_data = {
+                            "payment_status": data["payment_status"],
+                            "actually_paid": float(data.get("actually_paid", 0)),
+                            "pay_amount": float(data.get("pay_amount", 0)),
+                            "outcome_amount": float(data.get("outcome_amount", 0)),
+                            "outcome_currency": data.get("outcome_currency", "USD"),
+                            "confirmations": confirmations,
+                            "confirmations_required": confirmations_required,
+                            "updated_at": datetime.utcnow(),
+                            "last_check": datetime.utcnow()
+                        }
+                        
                         await self.db.payment_records.update_one(
                             {"payment_id": payment_id},
-                            {
-                                "$set": {
-                                    "payment_status": data["payment_status"],
-                                    "actually_paid": float(data.get("actually_paid", 0)),
-                                    "updated_at": datetime.utcnow(),
-                                    "last_check": datetime.utcnow()
-                                }
-                            }
+                            {"$set": update_data},
+                            upsert=True
                         )
                         
-                        logger.info(f"API check for {payment_id}: {data['payment_status']}")
+                        logger.info(f"API check for {payment_id}: status={data['payment_status']}, confirmations={confirmations}/{confirmations_required}")
                         
                         return {
                             "payment_id": payment_id,
@@ -252,11 +281,35 @@ class NOWPaymentsGateway:
                             "pay_amount": float(data.get("pay_amount", 0)),
                             "outcome_amount": float(data.get("outcome_amount", 0)),
                             "outcome_currency": data.get("outcome_currency", "USD"),
+                            "confirmations": confirmations,
+                            "confirmations_required": confirmations_required,
                             "from_cache": False
                         }
                     else:
                         logger.error(f"Failed to check payment status: {response.status}")
+                        # Return cached data if API fails
+                        if cached:
+                            return {
+                                "payment_id": payment_id,
+                                "payment_status": cached.get("payment_status", "waiting"),
+                                "actually_paid": float(cached.get("actually_paid", 0)),
+                                "pay_amount": float(cached.get("pay_amount", 0)),
+                                "from_cache": True,
+                                "api_error": True
+                            }
                         return None
+                        
+        except aiohttp.ClientError as e:
+            logger.error(f"Network error checking payment status: {e}")
+            # Return cached data on network errors
+            if cached:
+                return {
+                    "payment_id": payment_id,
+                    "payment_status": cached.get("payment_status", "waiting"),
+                    "from_cache": True,
+                    "network_error": True
+                }
+            return None
         except Exception as e:
             logger.error(f"Error checking payment status: {e}")
             return None

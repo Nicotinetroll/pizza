@@ -12,11 +12,25 @@ from bot_modules.handlers import (
 )
 from bot_modules.callbacks import handle_callback
 
+# Import the message updater for smooth animations
+try:
+    from bot_modules.message_updater import cleanup_old_messages
+    ANIMATION_SUPPORT = True
+except ImportError:
+    ANIMATION_SUPPORT = False
+    cleanup_old_messages = None
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+async def start_background_tasks():
+    """Start background tasks for the bot"""
+    if ANIMATION_SUPPORT and cleanup_old_messages:
+        asyncio.create_task(cleanup_old_messages())
+        logger.info("✅ Started message cleanup background task for smooth animations")
 
 async def register_dynamic_commands(application):
     try:
@@ -198,11 +212,34 @@ async def post_init(application):
         else:
             logger.warning("⚠️ Failed to load commands, using minimal fallback")
             register_fallback_commands(application)
-            
+        
+        # Start background tasks for smooth animations
+        await start_background_tasks()
+        
         settings = await message_loader.load_settings()
         if settings.get('maintenance_mode'):
             logger.warning(f"⚠️ MAINTENANCE MODE: {settings.get('maintenance_message')}")
+        
+        # Initialize payment gateway if available
+        try:
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
             
+            api_key = os.getenv("NOWPAYMENTS_API_KEY")
+            ipn_secret = os.getenv("NOWPAYMENTS_IPN_SECRET")
+            sandbox = os.getenv("NOWPAYMENTS_SANDBOX", "true").lower() == "true"
+            
+            if api_key and api_key not in ["", "demo_key_123456", "demo_mode"]:
+                from nowpayments_gateway import initialize_payment_gateway
+                initialize_payment_gateway(api_key, ipn_secret, sandbox)
+                logger.info(f"✅ NOWPayments gateway initialized (sandbox={sandbox})")
+                logger.info("💫 Smooth payment animations enabled!")
+            else:
+                logger.warning("⚠️ NOWPayments API key not configured - demo mode active")
+        except Exception as e:
+            logger.warning(f"⚠️ Payment gateway initialization skipped: {e}")
+        
         logger.info("✅ Bot initialization complete!")
         
     except Exception as e:
@@ -250,14 +287,19 @@ def main():
             )
             logger.info("📅 Auto-reload scheduled every 5 minutes")
         
-        logger.info("="*50)
-        logger.info("🍕💪 AnabolicPizza Bot - WITH CLEAR & REQUESTS")
+        logger.info("="*60)
+        logger.info("🍕💪 AnabolicPizza Bot - WITH SMOOTH ANIMATIONS")
         logger.info("🔧 Dynamic Loading + Clear Chat + Product Requests")
+        logger.info("💫 Smooth payment status animations enabled!")
         logger.info("✅ Buttons will work after restart!")
         logger.info("🧹 /clear command enabled")
         logger.info("📝 /request, /closerequest, /requests enabled")
         logger.info("🔄 Auto-reload: 5 minutes")
-        logger.info("="*50)
+        if ANIMATION_SUPPORT:
+            logger.info("🎬 Animation support: ACTIVE")
+        else:
+            logger.info("⚠️  Animation support: NOT INSTALLED")
+        logger.info("="*60)
         
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
@@ -286,6 +328,11 @@ if __name__ == "__main__":
                 db = client.telegram_shop
                 commands = await db.bot_commands.find({}).to_list(100)
                 logger.info(f"📋 Found {len(commands)} commands in database")
+                
+                # Check for payment records collection
+                collections = await db.list_collection_names()
+                if "payment_records" in collections:
+                    logger.info("💳 Payment records collection found")
                 
                 return True
             except Exception as e:
