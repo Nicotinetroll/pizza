@@ -46,9 +46,10 @@ class NOWPaymentsGateway:
         }
         
         # Database connection
-        from bot_modules.config import MONGODB_URI
+        from bot_modules.config import MONGODB_URI, BOT_USERNAME
         self.mongo_client = AsyncIOMotorClient(MONGODB_URI)
         self.db = self.mongo_client.telegram_shop
+        self.bot_username = BOT_USERNAME.replace('@', '')
     
     async def get_available_currencies(self) -> List[Dict]:
         """Get list of available currencies from NOWPayments"""
@@ -166,13 +167,16 @@ class NOWPaymentsGateway:
                 order_data["currency"].lower()
             )
             
+            # Simple description - no branding
+            description = f"Order {order_data['order_number']}"
+            
             # Prepare payment data
             payment_data = {
                 "price_amount": order_data["amount_usd"],
                 "price_currency": "usd",
                 "pay_currency": currency_code,
                 "order_id": order_data["order_number"],
-                "order_description": order_data.get("description", f"Order {order_data['order_number']}"),
+                "order_description": description,
                 "ipn_callback_url": "https://stnwgn.com/api/payments/webhook",
                 "is_fixed_rate": True,  # Fixed rate to avoid price fluctuations
                 "is_fee_paid_by_user": False
@@ -477,9 +481,11 @@ class NOWPaymentsGateway:
             logger.error(f"Error handling failed payment: {e}")
     
     async def notify_user_payment_confirmed(self, telegram_id: int, order_number: str):
-        """Send payment confirmation to user via Telegram"""
+        """Send payment confirmation to user via Telegram with navigation buttons"""
         try:
             from bot_modules.public_notifications import public_notifier
+            from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+            
             bot = public_notifier.bot
             
             message = f"""
@@ -489,15 +495,28 @@ Order: `{order_number}`
 
 Your payment has been confirmed! 🎉
 
-Your package will be shipped within 24 hours.
-You'll receive tracking information soon.
+*What happens next:*
+• Order is being processed
+• Shipping within 24 hours
+• You'll receive tracking information
 
 Thank you for your order! 💪
+
+_Time to get massive! Your gains are on the way!_ 🍕💉
 """
+            
+            # Navigation buttons that work in bot
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📦 My Orders", url=f"https://t.me/{self.bot_username}?start=orders")],
+                [InlineKeyboardButton("🏠 Main Menu", url=f"https://t.me/{self.bot_username}?start=menu")],
+                [InlineKeyboardButton("🍕 Order More", url=f"https://t.me/{self.bot_username}?start=shop")]
+            ])
+            
             await bot.send_message(
                 chat_id=telegram_id,
                 text=message,
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                reply_markup=keyboard
             )
             
         except Exception as e:

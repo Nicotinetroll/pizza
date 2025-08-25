@@ -766,6 +766,9 @@ async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='Markdown'
     )
 
+# Nájdite funkciu auto_check_payment_status v callbacks.py (okolo riadku 880)
+# a nahraďte ju touto verziou:
+
 async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, order_number: str, message_id: int = None):
     """Background task to check payment status - UPDATES EXISTING MESSAGE"""
     try:
@@ -778,9 +781,10 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
     if not payment_gateway:
         return
     
-    max_checks = 40  # 20 minutes / 30 seconds
-    check_interval = 30  # seconds
+    max_checks = 80  # 20 minutes / 15 seconds = 80 checks
+    check_interval = 15  # ZRÝCHLENÉ na 15 sekúnd!
     already_notified = False
+    last_status = "waiting"
     
     for i in range(max_checks):
         await asyncio.sleep(check_interval)
@@ -788,11 +792,58 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
         try:
             status = await payment_gateway.check_payment_status(payment_id)
             
-            if status and status.get("payment_status") == "finished" and not already_notified:
-                already_notified = True
+            if status:
+                current_status = status.get("payment_status", "waiting")
                 
-                # SUCCESS message
-                success_text = f"""
+                # Update správy pri KAŽDEJ zmene statusu
+                if current_status != last_status and message_id:
+                    last_status = current_status
+                    
+                    # Status emoji a text
+                    status_map = {
+                        "waiting": ("⏳", "Waiting for payment..."),
+                        "confirming": ("🔄", "Payment detected! Confirming..."),
+                        "sending": ("📤", "Processing payment..."),
+                        "partially_paid": ("⚠️", f"Partial payment: {status.get('actually_paid', 0):.8f}"),
+                        "finished": ("✅", "PAYMENT CONFIRMED!"),
+                        "failed": ("❌", "Payment failed"),
+                        "expired": ("⏰", "Payment expired")
+                    }
+                    
+                    emoji, status_text = status_map.get(current_status, ("❓", current_status))
+                    
+                    # Update existujúcej správy so statusom
+                    if current_status not in ["finished", "failed", "expired"]:
+                        update_text = f"""
+💰 *PAYMENT INSTRUCTIONS*
+
+Order: `{order_number}`
+
+━━━━━━━━━━━━━━━━━━━━━
+
+{emoji} *Status:* {status_text}
+
+━━━━━━━━━━━━━━━━━━━━━
+
+⏱️ *Expires in {20 - (i * check_interval // 60)} minutes*
+
+⚠️ Keep this chat open for updates
+"""
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=telegram_id,
+                                message_id=message_id,
+                                text=update_text,
+                                parse_mode='Markdown'
+                            )
+                        except:
+                            pass  # Ignore if message unchanged
+                
+                # Payment CONFIRMED
+                if current_status == "finished" and not already_notified:
+                    already_notified = True
+                    
+                    success_text = f"""
 ✅ *PAYMENT CONFIRMED!*
 
 Order: `{order_number}`
@@ -801,52 +852,57 @@ Your payment has been successfully received! 🎉
 
 *What happens next:*
 • Order is being processed
-• Shipping within 24 hours
+• Shipping within 24 hours  
 • You'll receive tracking info
 
 Thank you for your order! 💪
 
 _Time to get massive! Your gains are on the way!_ 🍕💉
 """
-                
-                keyboard = get_order_complete_keyboard()
-                
-                # Try to update existing message if we have message_id
-                if message_id:
-                    try:
-                        await bot.edit_message_text(
-                            chat_id=telegram_id,
-                            message_id=message_id,
-                            text=success_text,
-                            reply_markup=keyboard,
-                            parse_mode='Markdown'
-                        )
-                    except:
-                        # If edit fails, send new message
+                    
+                    # Keyboard s navigáciou
+                    from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📦 My Orders", callback_data="orders")],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")],
+                        [InlineKeyboardButton("🍕 Order More", callback_data="shop")]
+                    ])
+                    
+                    # Update EXISTUJÚCEJ správy (nie nová!)
+                    if message_id:
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=telegram_id,
+                                message_id=message_id,
+                                text=success_text,
+                                reply_markup=keyboard,
+                                parse_mode='Markdown'
+                            )
+                        except:
+                            # Ak edit zlyhá, pošli novú
+                            await bot.send_message(
+                                chat_id=telegram_id,
+                                text=success_text,
+                                reply_markup=keyboard,
+                                parse_mode='Markdown'
+                            )
+                    else:
                         await bot.send_message(
                             chat_id=telegram_id,
                             text=success_text,
                             reply_markup=keyboard,
                             parse_mode='Markdown'
                         )
-                else:
-                    # Send new message if no message_id
-                    await bot.send_message(
-                        chat_id=telegram_id,
-                        text=success_text,
-                        reply_markup=keyboard,
-                        parse_mode='Markdown'
-                    )
+                    
+                    logger.info(f"✅ Payment auto-confirmed for {order_number}")
+                    break
                 
-                logger.info(f"✅ Payment auto-confirmed for {order_number}")
-                break
-                
-            elif status and status.get("payment_status") == "partially_paid":
-                actually_paid = float(status.get("actually_paid", 0))
-                expected = float(status.get("pay_amount", 0))
-                remaining = expected - actually_paid
-                
-                if not already_notified:  # Only notify once about partial
+                # Partial payment
+                elif current_status == "partially_paid" and not already_notified:
+                    actually_paid = float(status.get("actually_paid", 0))
+                    expected = float(status.get("pay_amount", 0))
+                    remaining = expected - actually_paid
+                    
                     partial_text = f"""
 ⚠️ *PARTIAL PAYMENT RECEIVED*
 
@@ -858,42 +914,59 @@ Expected: `{expected:.8f}`
 
 Please send the remaining amount to the same address.
 """
-                    await bot.send_message(
-                        chat_id=telegram_id,
-                        text=partial_text,
-                        parse_mode='Markdown'
-                    )
+                    # Update existujúcej správy
+                    if message_id:
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=telegram_id,
+                                message_id=message_id,
+                                text=partial_text,
+                                parse_mode='Markdown'
+                            )
+                        except:
+                            pass
                 
-            elif status and status.get("payment_status") == "expired":
-                already_notified = True
-                
-                expired_text = f"""
+                # Payment expired
+                elif current_status == "expired":
+                    already_notified = True
+                    
+                    expired_text = f"""
 ❌ *PAYMENT EXPIRED*
 
 Order: `{order_number}`
 
 The payment window has expired.
-
 Please create a new order to continue.
 """
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
-                    [InlineKeyboardButton("💬 Support", callback_data="support")],
-                    [InlineKeyboardButton("🏠 Menu", callback_data="home")]
-                ])
-                
-                await bot.send_message(
-                    chat_id=telegram_id,
-                    text=expired_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
-                break
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
+                        [InlineKeyboardButton("💬 Support", callback_data="support")],
+                        [InlineKeyboardButton("🏠 Menu", callback_data="home")]
+                    ])
+                    
+                    # Update existujúcej správy
+                    if message_id:
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=telegram_id,
+                                message_id=message_id,
+                                text=expired_text,
+                                reply_markup=keyboard,
+                                parse_mode='Markdown'
+                            )
+                        except:
+                            await bot.send_message(
+                                chat_id=telegram_id,
+                                text=expired_text,
+                                reply_markup=keyboard,
+                                parse_mode='Markdown'
+                            )
+                    break
                 
         except Exception as e:
             logger.error(f"Error in payment check: {e}")
     
-    # Timeout after 20 minutes
+    # Timeout po 20 minútach
     if i == max_checks - 1 and not already_notified:
         timeout_text = f"""
 ⏰ *CHECKING TIMEOUT*
@@ -901,8 +974,7 @@ Please create a new order to continue.
 Order: `{order_number}`
 
 We're still waiting for your payment.
-
-If you've sent it, it may take longer to confirm due to network congestion.
+If you've sent it, it may take longer due to network congestion.
 
 Contact support if you need help.
 """
@@ -912,12 +984,23 @@ Contact support if you need help.
             [InlineKeyboardButton("🏠 Menu", callback_data="home")]
         ])
         
-        await bot.send_message(
-            chat_id=telegram_id,
-            text=timeout_text,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
+        # Update existujúcej správy
+        if message_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=telegram_id,
+                    message_id=message_id,
+                    text=timeout_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+            except:
+                await bot.send_message(
+                    chat_id=telegram_id,
+                    text=timeout_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
 
 # Helper function to update order payment details
 async def update_order_payment_details(order_id: str, payment_details: dict):
