@@ -687,11 +687,13 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from nowpayments_gateway import payment_gateway
         from .database import db
-    except:
-        logger.warning("Payment gateway not available for auto-check")
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+    except Exception as e:
+        logger.warning(f"Payment gateway not available for auto-check: {e}")
         return
     
     if not payment_gateway:
+        logger.warning("Payment gateway is None")
         return
     
     max_time = 1200  # 20 minutes total
@@ -700,7 +702,7 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
     already_notified = False
     last_status = "waiting"
     dot_count = 0
-    last_api_check = 0
+    last_api_check = -1  # Force first check immediately
     
     # Get payment details once at start
     payment_details = None
@@ -710,28 +712,40 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
         order = await db.orders.find_one({"order_number": order_number})
         if order and order.get("payment"):
             payment_details = {
-                "address": order["payment"].get("address", ""),
-                "amount": order["payment"].get("amount_crypto", 0),
-                "currency": order["payment"].get("currency", "")
+                "address": order["payment"].get("address", order["payment"].get("pay_address", "")),
+                "amount": order["payment"].get("amount_crypto", order["payment"].get("pay_amount", 0)),
+                "currency": order["payment"].get("currency", order["payment"].get("pay_currency", ""))
             }
             price_amount = float(order.get("total_usdt", 0))
-    except:
-        pass
+            logger.info(f"Got payment details for {order_number}: {payment_details}")
+    except Exception as e:
+        logger.error(f"Error getting payment details: {e}")
+    
+    # Keyboard for all status updates
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_id}")],
+        [
+            InlineKeyboardButton("❌ Cancel", callback_data="cancel_order"),
+            InlineKeyboardButton("❓ Help", callback_data="payment_help")
+        ]
+    ])
     
     # Main loop - runs every second
     while elapsed_time < max_time and not already_notified:
-        # Check API every 15 seconds
+        # Check API every 15 seconds (or immediately on first run)
         current_status = last_status
         status_data = None
         
-        if elapsed_time - last_api_check >= check_interval or elapsed_time == 0:
+        if elapsed_time - last_api_check >= check_interval:
             try:
+                logger.info(f"Checking payment status for {payment_id}")
                 status_data = await payment_gateway.check_payment_status(payment_id)
                 if status_data:
                     current_status = status_data.get("payment_status", "waiting")
+                    if current_status != last_status:
+                        logger.info(f"Payment status changed for {order_number}: {last_status} -> {current_status}")
                     last_status = current_status
                     last_api_check = elapsed_time
-                    logger.info(f"Payment status for {order_number}: {current_status}")
             except Exception as e:
                 logger.error(f"Error checking payment status: {e}")
         
@@ -769,7 +783,7 @@ Amount: **${price_amount:.2f}**
 ━━━━━━━━━━━━━━━━━━━━━
 """
             
-            # Show payment details if still waiting
+            # Show payment details if still waiting or confirming
             if payment_details and current_status in ["waiting", "confirming"]:
                 update_text += f"""
 📍 *Send EXACTLY this amount:*
@@ -779,49 +793,37 @@ Amount: **${price_amount:.2f}**
 `{payment_details['address']}`
 
 ━━━━━━━━━━━━━━━━━━━━━
+
+👆 *Tap the address or amount above to copy!*
+
+⏱️ *Expires in {time_remaining} minutes*
+
+⚠️ **IMPORTANT:**
+• Send the EXACT amount shown
+• Payment confirms automatically
+• Keep this chat open
+
 """
             
-            # Show current status with animation
-            update_text += f"""
-{emoji} *Status:* {status_text}
-"""
+            # Always show the animated status line
+            update_text += f"{emoji} *Status:* {status_text}"
             
             # Show additional info based on status
             if current_status == "confirming" and status_data:
                 confirmations = status_data.get("confirmations", 0)
                 required = status_data.get("confirmations_required", 1)
                 if confirmations > 0:
-                    update_text += f"🔗 *Confirmations:* {confirmations}/{required}\n"
+                    update_text += f"\n🔗 *Confirmations:* {confirmations}/{required}"
             
             elif current_status == "partially_paid" and status_data:
                 actually_paid = float(status_data.get("actually_paid", 0))
                 expected = float(status_data.get("pay_amount", 0))
                 remaining = expected - actually_paid
-                update_text += f"""
-💳 *Received:* {actually_paid:.8f}
-⚠️ *Still needed:* {remaining:.8f}
-"""
-            
-            update_text += f"""
-━━━━━━━━━━━━━━━━━━━━━
-
-⏱️ *Expires in {time_remaining} minutes*
-
-⚠️ Keep this chat open for updates
-"""
+                update_text += f"\n💳 *Received:* {actually_paid:.8f}"
+                update_text += f"\n⚠️ *Still needed:* {remaining:.8f}"
             
             # Update message
             try:
-                from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-                
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_id}")],
-                    [
-                        InlineKeyboardButton("❌ Cancel", callback_data="cancel_order"),
-                        InlineKeyboardButton("❓ Help", callback_data="payment_help")
-                    ]
-                ])
-                
                 await bot.edit_message_text(
                     chat_id=telegram_id,
                     message_id=message_id,
@@ -855,8 +857,7 @@ Thank you for your order! 💪
 _Time to get massive! Your gains are on the way!_ 🍕💉
 """
             
-            from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-            keyboard = InlineKeyboardMarkup([
+            success_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📦 My Orders", callback_data="orders")],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data="home")],
                 [InlineKeyboardButton("🍕 Order More", callback_data="shop")]
@@ -868,14 +869,15 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                         chat_id=telegram_id,
                         message_id=message_id,
                         text=success_text,
-                        reply_markup=keyboard,
+                        reply_markup=success_keyboard,
                         parse_mode='Markdown'
                     )
-                except:
+                except Exception as e:
+                    logger.error(f"Could not update to success message: {e}")
                     await bot.send_message(
                         chat_id=telegram_id,
                         text=success_text,
-                        reply_markup=keyboard,
+                        reply_markup=success_keyboard,
                         parse_mode='Markdown'
                     )
             
@@ -893,7 +895,7 @@ Order: `{order_number}`
 The payment window has expired.
 Please create a new order to continue.
 """
-            keyboard = InlineKeyboardMarkup([
+            expired_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
                 [InlineKeyboardButton("💬 Support", callback_data="support")],
                 [InlineKeyboardButton("🏠 Menu", callback_data="home")]
@@ -905,7 +907,7 @@ Please create a new order to continue.
                         chat_id=telegram_id,
                         message_id=message_id,
                         text=expired_text,
-                        reply_markup=keyboard,
+                        reply_markup=expired_keyboard,
                         parse_mode='Markdown'
                     )
                 except:
@@ -923,7 +925,7 @@ Order: `{order_number}`
 The payment could not be processed.
 Please try again or contact support.
 """
-            keyboard = InlineKeyboardMarkup([
+            failed_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Try Again", callback_data="shop")],
                 [InlineKeyboardButton("💬 Support", callback_data="support")],
                 [InlineKeyboardButton("🏠 Menu", callback_data="home")]
@@ -935,7 +937,7 @@ Please try again or contact support.
                         chat_id=telegram_id,
                         message_id=message_id,
                         text=failed_text,
-                        reply_markup=keyboard,
+                        reply_markup=failed_keyboard,
                         parse_mode='Markdown'
                     )
                 except:
@@ -958,7 +960,7 @@ If you've sent it, it may take longer due to network congestion.
 
 Contact support if you need help.
 """
-        keyboard = InlineKeyboardMarkup([
+        timeout_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
             [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
             [InlineKeyboardButton("🏠 Menu", callback_data="home")]
@@ -970,7 +972,7 @@ Contact support if you need help.
                     chat_id=telegram_id,
                     message_id=message_id,
                     text=timeout_text,
-                    reply_markup=keyboard,
+                    reply_markup=timeout_keyboard,
                     parse_mode='Markdown'
                 )
             except:
