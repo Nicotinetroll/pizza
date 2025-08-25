@@ -350,67 +350,69 @@ class NOWPaymentsGateway:
             logger.error(f"Error processing IPN callback: {e}")
             return False
     
-    async def _confirm_order_payment(self, order_number: str, payment_id: str, payment_data: Dict):
-    """Confirm order payment in database and notify user"""
-    try:
-        # Find order by order_number
-        order = await self.db.orders.find_one({"order_number": order_number})
-        if not order:
-            logger.error(f"Order not found: {order_number}")
-            return
-        
-        # Update order status to PAID - THIS IS CRUCIAL!
-        await self.db.orders.update_one(
-            {"order_number": order_number},
-            {
-                "$set": {
-                    "status": "paid",  # MUST BE "paid" for notification!
-                    "paid_at": datetime.utcnow(),
-                    "payment.status": "confirmed",
-                    "payment.transaction_id": payment_id,
-                    "payment.actually_paid": float(payment_data.get("actually_paid", 0)),
-                    "payment.outcome_amount": float(payment_data.get("outcome_amount", 0)),
-                    "payment.outcome_currency": payment_data.get("outcome_currency")
+    async def confirm_order_payment(self, order_id: str, payment_data: dict) -> bool:
+        """Confirm order payment in database and notify user"""
+        try:
+            from bson import ObjectId
+            
+            # Update order status to paid
+            result = await self.db.orders.update_one(
+                {"_id": ObjectId(order_id)},
+                {
+                    "$set": {
+                        "status": "paid",
+                        "paid_at": datetime.utcnow(),
+                        "payment.status": "confirmed",
+                        "payment.transaction_id": payment_data.get("payment_id"),
+                        "payment.actually_paid": payment_data.get("actually_paid"),
+                        "payment.outcome_amount": payment_data.get("outcome_amount"),
+                        "payment.outcome_currency": payment_data.get("outcome_currency")
+                    }
                 }
-            }
-        )
-        
-        # Re-fetch updated order
-        order = await self.db.orders.find_one({"order_number": order_number})
-        
-        # Update product sold counts
-        if order.get("items"):
-            for item in order["items"]:
-                await self.db.products.update_one(
-                    {"name": item["product_name"]},
-                    {"$inc": {"sold_count": item.get("quantity", 1)}}
-                )
-        
-        # Update user stats
-        await self.db.users.update_one(
-            {"telegram_id": order["telegram_id"]},
-            {
-                "$inc": {
-                    "total_orders": 1,
-                    "total_spent_usdt": float(order.get("total_usdt", 0))
-                }
-            }
-        )
-        
-        # Send public notification - order MUST have status "paid"!
-        from bot_modules.public_notifications import public_notifier
-        if order["status"] == "paid":
-            asyncio.create_task(public_notifier.send_notification(order))
-            logger.info(f"✅ Public notification scheduled for order {order_number}")
-        else:
-            logger.warning(f"Order status is {order['status']}, not sending notification")
-        
-        logger.info(f"✅ Order {order_number} payment confirmed")
-        
-    except Exception as e:
-        logger.error(f"Error confirming order payment: {e}")
-        import traceback
-        traceback.print_exc()
+            )
+            
+            if result.modified_count > 0:
+                # Get order details
+                order = await self.db.orders.find_one({"_id": ObjectId(order_id)})
+                
+                if order:
+                    # Update product sold counts
+                    if order.get("items"):
+                        for item in order["items"]:
+                            await self.db.products.update_one(
+                                {"name": item["product_name"]},
+                                {"$inc": {"sold_count": item.get("quantity", 1)}}
+                            )
+                    
+                    # Update user stats
+                    await self.db.users.update_one(
+                        {"telegram_id": order["telegram_id"]},
+                        {
+                            "$inc": {
+                                "total_orders": 1,
+                                "total_spent_usdt": float(order.get("total_usdt", 0))
+                            }
+                        }
+                    )
+                    
+                    # Send notification to public channel (if enabled)
+                    try:
+                        from bot_modules.public_notifications import public_notifier
+                        asyncio.create_task(public_notifier.send_notification(order))
+                    except Exception as notif_err:
+                        logger.error(f"Notification error: {notif_err}")
+                    
+                    logger.info(f"✅ Order {order['order_number']} marked as PAID via IPN")
+                    return True
+            
+            logger.warning(f"Failed to update order {order_id}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error confirming payment: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
         """Confirm order payment in database"""
         try:
             # Find order by order_number
