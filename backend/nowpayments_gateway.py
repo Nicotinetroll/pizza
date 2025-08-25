@@ -200,6 +200,8 @@ class NOWPaymentsGateway:
                 "error": str(e)
             }
     
+    # Replace the check_payment_status method in nowpayments_gateway.py with this:
+
     async def check_payment_status(self, payment_id: str) -> Dict:
         """Check payment status with intelligent caching for smooth animations"""
         try:
@@ -224,12 +226,12 @@ class NOWPaymentsGateway:
                         return {
                             "payment_id": payment_id,
                             "payment_status": cached.get("payment_status", "waiting"),
-                            "actually_paid": float(cached.get("actually_paid", 0)),
-                            "pay_amount": float(cached.get("pay_amount", 0)),
-                            "outcome_amount": float(cached.get("outcome_amount", 0)),
+                            "actually_paid": float(cached.get("actually_paid") or 0),
+                            "pay_amount": float(cached.get("pay_amount") or 0),
+                            "outcome_amount": float(cached.get("outcome_amount") or 0),
                             "outcome_currency": cached.get("outcome_currency", "USD"),
-                            "confirmations": cached.get("confirmations", 0),
-                            "confirmations_required": cached.get("confirmations_required", 1),
+                            "confirmations": int(cached.get("confirmations") or 0),
+                            "confirmations_required": int(cached.get("confirmations_required") or 1),
                             "from_cache": True,
                             "cache_age": time_diff
                         }
@@ -247,18 +249,23 @@ class NOWPaymentsGateway:
                         confirmations = 0
                         confirmations_required = 1
                         
-                        # NOWPayments specific fields
-                        if "confirmations" in data:
+                        # NOWPayments specific fields - handle None values
+                        if "confirmations" in data and data["confirmations"] is not None:
                             confirmations = int(data["confirmations"])
-                        if "confirmations_needed" in data:
+                        if "confirmations_needed" in data and data["confirmations_needed"] is not None:
                             confirmations_required = int(data["confirmations_needed"])
+                        
+                        # Safely get numeric values with defaults
+                        actually_paid = float(data.get("actually_paid") or 0)
+                        pay_amount = float(data.get("pay_amount") or 0)
+                        outcome_amount = float(data.get("outcome_amount") or 0)
                         
                         # Update database with new status
                         update_data = {
-                            "payment_status": data["payment_status"],
-                            "actually_paid": float(data.get("actually_paid", 0)),
-                            "pay_amount": float(data.get("pay_amount", 0)),
-                            "outcome_amount": float(data.get("outcome_amount", 0)),
+                            "payment_status": data.get("payment_status", "waiting"),
+                            "actually_paid": actually_paid,
+                            "pay_amount": pay_amount,
+                            "outcome_amount": outcome_amount,
                             "outcome_currency": data.get("outcome_currency", "USD"),
                             "confirmations": confirmations,
                             "confirmations_required": confirmations_required,
@@ -272,14 +279,14 @@ class NOWPaymentsGateway:
                             upsert=True
                         )
                         
-                        logger.info(f"API check for {payment_id}: status={data['payment_status']}, confirmations={confirmations}/{confirmations_required}")
+                        logger.info(f"API check for {payment_id}: status={data.get('payment_status', 'unknown')}, confirmations={confirmations}/{confirmations_required}")
                         
                         return {
                             "payment_id": payment_id,
-                            "payment_status": data["payment_status"],
-                            "actually_paid": float(data.get("actually_paid", 0)),
-                            "pay_amount": float(data.get("pay_amount", 0)),
-                            "outcome_amount": float(data.get("outcome_amount", 0)),
+                            "payment_status": data.get("payment_status", "waiting"),
+                            "actually_paid": actually_paid,
+                            "pay_amount": pay_amount,
+                            "outcome_amount": outcome_amount,
                             "outcome_currency": data.get("outcome_currency", "USD"),
                             "confirmations": confirmations,
                             "confirmations_required": confirmations_required,
@@ -292,8 +299,8 @@ class NOWPaymentsGateway:
                             return {
                                 "payment_id": payment_id,
                                 "payment_status": cached.get("payment_status", "waiting"),
-                                "actually_paid": float(cached.get("actually_paid", 0)),
-                                "pay_amount": float(cached.get("pay_amount", 0)),
+                                "actually_paid": float(cached.get("actually_paid") or 0),
+                                "pay_amount": float(cached.get("pay_amount") or 0),
                                 "from_cache": True,
                                 "api_error": True
                             }
@@ -306,6 +313,8 @@ class NOWPaymentsGateway:
                 return {
                     "payment_id": payment_id,
                     "payment_status": cached.get("payment_status", "waiting"),
+                    "actually_paid": float(cached.get("actually_paid") or 0),
+                    "pay_amount": float(cached.get("pay_amount") or 0),
                     "from_cache": True,
                     "network_error": True
                 }

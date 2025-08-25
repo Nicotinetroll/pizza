@@ -702,8 +702,10 @@ async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='Markdown'
     )
 
+# Replace the auto_check_payment_status function in callbacks.py with this fixed version:
+
 async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, order_number: str, message_id: int = None):
-    """Payment status checker with ultra-smooth animations"""
+    """Payment status checker with smooth 3-dot animations and proper error handling"""
     
     if not ANIMATION_SUPPORT or not message_updater or not status_animator:
         # Fallback to simple checking
@@ -724,16 +726,17 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
     
     # Configuration
     max_time = 1200  # 20 minutes
-    api_check_interval = 5  # Check API every 5 seconds
-    animation_fps = 2  # Updates per second for smooth animation
-    animation_interval = 1.0 / animation_fps
+    api_check_interval = 10  # Check API every 10 seconds
+    animation_interval = 3  # Update animation every 3 seconds
     
     elapsed_time = 0
-    last_api_check = -api_check_interval
+    last_api_check = -api_check_interval  # Force first check immediately
+    last_animation_update = 0
     already_notified = False
     current_status = "waiting"
     last_status = "waiting"
     status_data = None
+    api_check_successful = False  # Track if we've had at least one successful API call
     
     # Get payment details
     order = await db.orders.find_one({"order_number": order_number})
@@ -747,12 +750,12 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
     }
     price_amount = float(order.get("total_usdt", 0))
     
-    # Animation key for this payment
-    animation_key = f"payment_{payment_id}"
+    # Animation frames - max 3 dots
+    dot_frames = ["", ".", "..", "..."]
+    current_frame = 0
     
-    # Keyboard
+    # Keyboard WITHOUT "I've Sent Payment" button
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_id}")],
         [
             InlineKeyboardButton("❌ Cancel", callback_data="cancel_order"),
             InlineKeyboardButton("❓ Help", callback_data="payment_help")
@@ -788,14 +791,16 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
         # Check API periodically
         if elapsed_time - last_api_check >= api_check_interval:
             try:
+                logger.info(f"Checking payment status for {payment_id} (attempt at {elapsed_time}s)")
                 status_data = await payment_gateway.check_payment_status(payment_id)
                 
                 if status_data:
+                    api_check_successful = True  # Mark that we've had at least one successful check
                     new_status = status_data.get("payment_status", "waiting")
                     
                     if new_status != last_status:
                         logger.info(f"Status changed: {last_status} -> {new_status}")
-                        status_animator.reset(animation_key)  # Reset animation on status change
+                        current_frame = 0  # Reset animation on status change
                         last_status = new_status
                     
                     current_status = new_status
@@ -803,24 +808,37 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
                     
             except Exception as e:
                 logger.error(f"API check error: {e}")
+                # Don't update status_data if check failed
+                # Continue using last known status
         
-        # Get animation frame
-        dots = status_animator.get_frame("dots", animation_key)
+        # Only update message if we've had at least one successful API check
+        # or if we're still in the first few seconds
+        if not api_check_successful and elapsed_time > 5:
+            # Wait a bit before trying again
+            await asyncio.sleep(1)
+            elapsed_time += 1
+            continue
         
-        # Calculate remaining time
-        time_remaining = max(0, 20 - (elapsed_time // 60))
-        
-        # Build message
-        message_text = f"""💰 *PAYMENT INSTRUCTIONS*
+        # Update animation every 3 seconds
+        if elapsed_time - last_animation_update >= animation_interval:
+            # Update dot animation (max 3 dots)
+            current_frame = (current_frame + 1) % len(dot_frames)
+            dots = dot_frames[current_frame]
+            
+            # Calculate remaining time
+            time_remaining = max(0, 20 - (elapsed_time // 60))
+            
+            # Build message
+            message_text = f"""💰 *PAYMENT INSTRUCTIONS*
 
 Order: `{order_number}`
 Amount: **${price_amount:.2f}**
 
 ━━━━━━━━━━━━━━━━━━━━━"""
-        
-        # Add payment details for active states
-        if current_status in ["waiting", "confirming", "partially_paid"]:
-            message_text += f"""
+            
+            # Add payment details for active states
+            if current_status in ["waiting", "confirming", "partially_paid"]:
+                message_text += f"""
 
 📍 *Send EXACTLY this amount:*
 `{payment_details['amount']:.8f}` {payment_details['currency']}
@@ -830,37 +848,51 @@ Amount: **${price_amount:.2f}**
 
 ━━━━━━━━━━━━━━━━━━━━━
 
-⏱️ *Expires in {time_remaining} minutes*"""
-        
-        # Add status line with animation
-        emoji = status_emojis.get(current_status, "❓")
-        status_text = status_messages.get(current_status, current_status)
-        message_text += f"\n\n{emoji} *Status:* {status_text}{dots}"
-        
-        # Additional status-specific info
-        if current_status == "confirming" and status_data:
-            confirmations = status_data.get("confirmations", 0)
-            required = status_data.get("confirmations_required", 1)
-            if confirmations > 0:
-                progress_bar = "▓" * confirmations + "░" * (required - confirmations)
-                message_text += f"\n🔗 Confirmations: [{progress_bar}] {confirmations}/{required}"
-        
-        elif current_status == "partially_paid" and status_data:
-            paid = float(status_data.get("actually_paid", 0))
-            total = float(status_data.get("pay_amount", 0))
-            percent = (paid / total * 100) if total > 0 else 0
-            message_text += f"\n💳 Received: {percent:.1f}% ({paid:.8f}/{total:.8f})"
-        
-        # Update message using smooth updater
-        if message_id and current_status not in ["finished", "failed", "expired"]:
-            await message_updater.update_message(
-                bot=bot,
-                chat_id=telegram_id,
-                message_id=message_id,
-                text=message_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
+👆 *Tap the address or amount above to copy!*
+
+⏱️ *Expires in {time_remaining} minutes*
+
+⚠️ **IMPORTANT:**
+• Send the EXACT amount shown
+• Payment confirms automatically
+• Keep this chat open"""
+            
+            # Add status line with animation
+            emoji = status_emojis.get(current_status, "❓")
+            status_text = status_messages.get(current_status, current_status)
+            message_text += f"\n\n{emoji} *Status:* {status_text}{dots}"
+            
+            # Additional status-specific info (only if we have valid status_data)
+            if current_status == "confirming" and status_data and api_check_successful:
+                confirmations = status_data.get("confirmations", 0)
+                required = status_data.get("confirmations_required", 1)
+                if confirmations > 0:
+                    progress_bar = "▓" * confirmations + "░" * (required - confirmations)
+                    message_text += f"\n🔗 Confirmations: [{progress_bar}] {confirmations}/{required}"
+            
+            elif current_status == "partially_paid" and status_data and api_check_successful:
+                # Safely handle potential None values
+                actually_paid = status_data.get("actually_paid")
+                pay_amount = status_data.get("pay_amount")
+                
+                if actually_paid is not None and pay_amount is not None:
+                    paid = float(actually_paid)
+                    total = float(pay_amount)
+                    if total > 0:
+                        percent = (paid / total * 100)
+                        message_text += f"\n💳 Received: {percent:.1f}% ({paid:.8f}/{total:.8f})"
+            
+            # Update message using smooth updater
+            if message_id and current_status not in ["finished", "failed", "expired"]:
+                await message_updater.update_message(
+                    bot=bot,
+                    chat_id=telegram_id,
+                    message_id=message_id,
+                    text=message_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+                last_animation_update = elapsed_time
         
         # Handle terminal states
         if current_status == "finished" and not already_notified:
@@ -876,9 +908,9 @@ Order: `{order_number}`
 Your payment has been successfully received! 🎉
 
 *What happens next:*
-- Order is being processed
-- Shipping within 24 hours
-- You'll receive tracking info
+• Order is being processed
+• Shipping within 24 hours
+• You'll receive tracking info
 
 Thank you for your order! 💪🚀
 
@@ -932,14 +964,13 @@ _Time to get massive! Your gains are on the way!_ 🍕💉"""
             )
             break
         
-        # Wait for next frame
-        await asyncio.sleep(animation_interval)
-        elapsed_time += animation_interval
+        # Wait 1 second before next iteration
+        await asyncio.sleep(1)
+        elapsed_time += 1
     
     # Cleanup
     if ANIMATION_SUPPORT:
         message_updater.clear_message_cache(telegram_id, message_id)
-        status_animator.reset(animation_key)
     
     # Timeout handling
     if elapsed_time >= max_time and not already_notified:
