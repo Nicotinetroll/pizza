@@ -100,13 +100,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("pay_"):
         await handle_payment(update, context, data)
     
-    # Copy handlers
-    elif data.startswith("copy_addr_"):
-        await handle_copy_address(update, context, data)
-    
-    elif data.startswith("copy_amount_"):
-        await handle_copy_amount(update, context, data)
-    
     # Payment retry
     elif data.startswith("retry_pay_"):
         await handle_retry_payment(update, context, data)
@@ -196,32 +189,6 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_quantity_change(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle simplified quantity adjustment"""
-    query = update.callback_query
-    user_id = update.effective_user.id
-    
-    if "minus" in data:
-        product_id = data.replace("qty_minus_", "")
-        adjustment = -1
-    elif "plus" in data:
-        product_id = data.replace("qty_plus_", "")
-        adjustment = 1
-    else:
-        return
-    
-    # Použij cart_manager namiesto user_quantities
-    new_qty = cart_manager.adjust_quantity(user_id, product_id, adjustment)
-    
-    # Show feedback
-    if adjustment < 0 and new_qty == 1:
-        await query.answer("Minimum quantity is 1!", show_alert=False)
-    elif adjustment > 0 and new_qty >= 20:
-        await query.answer(f"Quantity set to {new_qty}. That's a lot! 💪", show_alert=True)
-    else:
-        await query.answer(f"Quantity: {new_qty}", show_alert=False)
-    
-    # Refresh product detail
-    await show_product_detail(update, context, product_id)
     """Handle simplified quantity adjustment"""
     query = update.callback_query
     user_id = update.effective_user.id
@@ -530,7 +497,7 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
                     'currency': payment_result["pay_currency"].upper()
                 }
                 
-                # Format payment instructions
+                # Format payment instructions with copyable text
                 payment_text = f"""
 💰 *PAYMENT INSTRUCTIONS*
 
@@ -539,31 +506,28 @@ Amount: **${total:.2f}**
 
 ━━━━━━━━━━━━━━━━━━━━━
 
-📍 *Send EXACTLY:*
-`{payment_result['pay_amount']:.8f}`
-**{payment_result['pay_currency'].upper()}**
+📍 *Send EXACTLY this amount:*
+`{payment_result['pay_amount']:.8f}` {payment_result['pay_currency'].upper()}
 
-📬 *To address:*
+📬 *To this address:*
 `{payment_result['pay_address']}`
 
-👆 *Tap to copy the address!*
-
 ━━━━━━━━━━━━━━━━━━━━━
+
+👆 *Tap the address or amount above to copy!*
 
 ⏱️ *Expires in 20 minutes*
 
 ⚠️ **IMPORTANT:**
-• Send the EXACT amount
-• Payment auto-confirms
+• Send the EXACT amount shown
+• Payment confirms automatically
 • Keep this chat open
 
-🔄 *Status:* Waiting...
+🔄 *Status:* Waiting for payment...
 """
                 
-                # Create keyboard with copy buttons
+                # Simplified keyboard without copy buttons
                 keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📋 Copy Address", callback_data=f"copy_addr_{payment_result['payment_id']}")],
-                    [InlineKeyboardButton("📋 Copy Amount", callback_data=f"copy_amount_{payment_result['payment_id']}")],
                     [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_result['payment_id']}")],
                     [
                         InlineKeyboardButton("❌ Cancel", callback_data="cancel_order"),
@@ -573,13 +537,17 @@ Amount: **${total:.2f}**
                 
                 await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
                 
-                # Start background payment checker
+                # Store message_id for updating
+                message_id = query.message.message_id
+                
+                # Start background payment checker with message_id
                 asyncio.create_task(
                     auto_check_payment_status(
                         context.bot,
                         user_id,
                         payment_result['payment_id'],
-                        order['order_number']
+                        order['order_number'],
+                        message_id  # Pass message_id to update same message
                     )
                 )
                 return
@@ -798,8 +766,8 @@ async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='Markdown'
     )
 
-async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, order_number: str):
-    """Background task to check payment status - PRODUCTION VERSION"""
+async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, order_number: str, message_id: int = None):
+    """Background task to check payment status - UPDATES EXISTING MESSAGE"""
     try:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from nowpayments_gateway import payment_gateway
@@ -843,12 +811,32 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                 
                 keyboard = get_order_complete_keyboard()
                 
-                await bot.send_message(
-                    chat_id=telegram_id,
-                    text=success_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
+                # Try to update existing message if we have message_id
+                if message_id:
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=telegram_id,
+                            message_id=message_id,
+                            text=success_text,
+                            reply_markup=keyboard,
+                            parse_mode='Markdown'
+                        )
+                    except:
+                        # If edit fails, send new message
+                        await bot.send_message(
+                            chat_id=telegram_id,
+                            text=success_text,
+                            reply_markup=keyboard,
+                            parse_mode='Markdown'
+                        )
+                else:
+                    # Send new message if no message_id
+                    await bot.send_message(
+                        chat_id=telegram_id,
+                        text=success_text,
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
+                    )
                 
                 logger.info(f"✅ Payment auto-confirmed for {order_number}")
                 break

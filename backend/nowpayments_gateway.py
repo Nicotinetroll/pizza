@@ -351,6 +351,66 @@ class NOWPaymentsGateway:
             return False
     
     async def _confirm_order_payment(self, order_number: str, payment_id: str, payment_data: Dict):
+    """Confirm order payment in database and notify user"""
+    try:
+        # Find order by order_number
+        order = await self.db.orders.find_one({"order_number": order_number})
+        if not order:
+            logger.error(f"Order not found: {order_number}")
+            return
+        
+        # Update order status to PAID - THIS IS CRUCIAL!
+        await self.db.orders.update_one(
+            {"order_number": order_number},
+            {
+                "$set": {
+                    "status": "paid",  # MUST BE "paid" for notification!
+                    "paid_at": datetime.utcnow(),
+                    "payment.status": "confirmed",
+                    "payment.transaction_id": payment_id,
+                    "payment.actually_paid": float(payment_data.get("actually_paid", 0)),
+                    "payment.outcome_amount": float(payment_data.get("outcome_amount", 0)),
+                    "payment.outcome_currency": payment_data.get("outcome_currency")
+                }
+            }
+        )
+        
+        # Re-fetch updated order
+        order = await self.db.orders.find_one({"order_number": order_number})
+        
+        # Update product sold counts
+        if order.get("items"):
+            for item in order["items"]:
+                await self.db.products.update_one(
+                    {"name": item["product_name"]},
+                    {"$inc": {"sold_count": item.get("quantity", 1)}}
+                )
+        
+        # Update user stats
+        await self.db.users.update_one(
+            {"telegram_id": order["telegram_id"]},
+            {
+                "$inc": {
+                    "total_orders": 1,
+                    "total_spent_usdt": float(order.get("total_usdt", 0))
+                }
+            }
+        )
+        
+        # Send public notification - order MUST have status "paid"!
+        from bot_modules.public_notifications import public_notifier
+        if order["status"] == "paid":
+            asyncio.create_task(public_notifier.send_notification(order))
+            logger.info(f"✅ Public notification scheduled for order {order_number}")
+        else:
+            logger.warning(f"Order status is {order['status']}, not sending notification")
+        
+        logger.info(f"✅ Order {order_number} payment confirmed")
+        
+    except Exception as e:
+        logger.error(f"Error confirming order payment: {e}")
+        import traceback
+        traceback.print_exc()
         """Confirm order payment in database"""
         try:
             # Find order by order_number
