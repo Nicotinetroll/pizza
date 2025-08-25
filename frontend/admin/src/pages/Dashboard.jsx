@@ -292,14 +292,59 @@ const Dashboard = () => {
       const uniqueUsers = new Set(filteredOrders.map(order => order.user_id || order.telegram_id)).size;
       const avgOrderValue = filteredOrders.length > 0 ? totalRevenue / filteredOrders.length : 0;
       
+      // FIX: Calculate ACTUAL profit correctly considering discounts
+      const calculateOrderProfit = (order) => {
+        // If order has profit_usdt field from backend, use it
+        if (order.profit_usdt !== undefined && order.profit_usdt !== null) {
+          return order.profit_usdt;
+        }
+        
+        // Otherwise calculate based on items
+        if (order.items && order.items.length > 0) {
+          // Calculate profit from items
+          let itemsProfit = 0;
+          order.items.forEach(item => {
+            // If item has profit info, use it
+            if (item.profit_per_unit) {
+              itemsProfit += item.profit_per_unit * item.quantity;
+            } else if (item.purchase_price_usdt && item.price_usdt) {
+              // Calculate profit: (selling price - purchase price) * quantity
+              const profitPerUnit = item.price_usdt - item.purchase_price_usdt;
+              itemsProfit += profitPerUnit * item.quantity;
+            } else {
+              // Fallback: assume 40% margin on the item price
+              itemsProfit += (item.subtotal_usdt || 0) * 0.4;
+            }
+          });
+          
+          // Discounts reduce our profit directly
+          const finalProfit = itemsProfit - (order.discount_amount || 0);
+          return Math.max(0, finalProfit); // Profit can't be negative
+        }
+        
+        // Fallback: If no items data, estimate based on total
+        // This is less accurate but prevents showing wrong data
+        const estimatedCost = (order.total_usdt || 0) * 0.6; // Assume 60% cost
+        const estimatedProfit = (order.total_usdt || 0) - estimatedCost;
+        return Math.max(0, estimatedProfit);
+      };
+      
+      const totalProfit = filteredOrders.reduce((sum, order) => {
+        return sum + calculateOrderProfit(order);
+      }, 0);
+      
       // Calculate previous period stats for growth percentages
       const prevRevenue = previousPeriodOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
+      const prevProfit = previousPeriodOrders.reduce((sum, order) => {
+        return sum + calculateOrderProfit(order);
+      }, 0);
       const prevOrders = previousPeriodOrders.length;
       const prevUsers = new Set(previousPeriodOrders.map(order => order.user_id || order.telegram_id)).size;
       const prevAvgOrder = previousPeriodOrders.length > 0 ? prevRevenue / previousPeriodOrders.length : 0;
       
       // Calculate growth percentages
       const revenueGrowth = prevRevenue > 0 ? ((totalRevenue - prevRevenue) / prevRevenue) * 100 : 0;
+      const profitGrowth = prevProfit > 0 ? ((totalProfit - prevProfit) / prevProfit) * 100 : 0;
       const ordersGrowth = prevOrders > 0 ? ((filteredOrders.length - prevOrders) / prevOrders) * 100 : 0;
       const usersGrowth = prevUsers > 0 ? ((uniqueUsers - prevUsers) / prevUsers) * 100 : 0;
       const avgOrderGrowth = prevAvgOrder > 0 ? ((avgOrderValue - prevAvgOrder) / prevAvgOrder) * 100 : 0;
@@ -307,11 +352,13 @@ const Dashboard = () => {
       // Set calculated stats
       const calculatedStats = {
         total_revenue_usdt: totalRevenue,
+        total_profit_usdt: totalProfit,
         total_orders: filteredOrders.length,
         total_users: uniqueUsers,
         avg_order_value: avgOrderValue,
         // Growth percentages
         revenue_growth: revenueGrowth,
+        profit_growth: profitGrowth,
         orders_growth: ordersGrowth,
         users_growth: usersGrowth,
         avg_order_growth: avgOrderGrowth,
@@ -340,10 +387,13 @@ const Dashboard = () => {
             return orderDate.getHours() === hour;
           });
           
+          const hourRevenue = hourOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
+          const hourProfit = hourOrders.reduce((sum, order) => sum + calculateOrderProfit(order), 0);
+          
           hourlyData.push({
             _id: `${hour.toString().padStart(2, '0')}:00`,
-            revenue: hourOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0),
-            profit: hourOrders.reduce((sum, order) => sum + ((order.profit_usdt || order.total_usdt * 0.4) || 0), 0),
+            revenue: hourRevenue,
+            profit: hourProfit,
             orders: hourOrders.length
           });
         }
@@ -372,7 +422,7 @@ const Dashboard = () => {
           
           const dayData = dailyMap.get(dateKey);
           dayData.revenue += order.total_usdt || 0;
-          dayData.profit += (order.profit_usdt || order.total_usdt * 0.4) || 0;
+          dayData.profit += calculateOrderProfit(order);
           dayData.orders += 1;
         });
         
@@ -389,10 +439,12 @@ const Dashboard = () => {
       console.error('Error fetching dashboard data:', error);
       setStats({
         total_revenue_usdt: 0,
+        total_profit_usdt: 0,
         total_orders: 0,
         total_users: 0,
         avg_order_value: 0,
         revenue_growth: 0,
+        profit_growth: 0,
         orders_growth: 0,
         users_growth: 0,
         avg_order_growth: 0,
@@ -737,16 +789,18 @@ const Dashboard = () => {
           decimals={isMobile ? 0 : 2}
         />
         <MobileStatCard
+          title="Profit"
+          value={stats.total_profit_usdt || 0}
+          change={stats.profit_growth}
+          icon={TargetIcon}
+          color="#10b981"
+          prefix="$"
+          decimals={isMobile ? 0 : 2}
+        />
+        <MobileStatCard
           title="Orders"
           value={stats.total_orders || 0}
           change={stats.orders_growth}
-          icon={TargetIcon}
-          color="#10b981"
-        />
-        <MobileStatCard
-          title="Users"
-          value={stats.total_users || 0}
-          change={stats.users_growth}
           icon={ActivityLogIcon}
           color="#f59e0b"
         />

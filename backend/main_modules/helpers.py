@@ -40,7 +40,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_top_sellers():
-    """Helper to get top performing sellers"""
+    """Helper to get top performing sellers - FIXED VERSION"""
     from .config import db
     from bson import ObjectId
     
@@ -48,6 +48,10 @@ async def get_top_sellers():
         "is_active": {"$ne": False},
         "deleted_at": {"$exists": False}
     }).to_list(100)
+    
+    # Cache all products for performance
+    all_products = await db.products.find({}).to_list(None)
+    products_cache = {p["name"]: p for p in all_products}
     
     seller_earnings = []
     
@@ -62,17 +66,27 @@ async def get_top_sellers():
             }).to_list(100)
             
             for order in orders:
+                # Calculate actual profit from order
                 actual_profit = 0
+                
                 if order.get("items"):
                     for item in order["items"]:
-                        product = await db.products.find_one({"name": item["product_name"]})
+                        product = products_cache.get(item.get("product_name"))
+                        
                         if product:
                             purchase_price = product.get("purchase_price_usdt", 0)
                             selling_price = item.get("price_usdt", 0)
                             quantity = item.get("quantity", 1)
+                            
+                            # Calculate profit per item
                             item_profit = (selling_price - purchase_price) * quantity
                             actual_profit += item_profit
                 
+                # Subtract discount from profit (discounts reduce profit!)
+                discount_amount = order.get("discount_amount", 0)
+                actual_profit = max(0, actual_profit - discount_amount)
+                
+                # Calculate commission from PROFIT, not revenue
                 seller_commission_rate = seller.get("commission_percentage", 30)
                 commission = actual_profit * (seller_commission_rate / 100)
                 total_commission += commission
@@ -83,6 +97,7 @@ async def get_top_sellers():
                 "earnings": format_price(total_commission)
             })
     
+    # Sort by earnings
     seller_earnings.sort(key=lambda x: float(x["earnings"]), reverse=True)
     return seller_earnings[:5]
 
