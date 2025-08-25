@@ -8,7 +8,7 @@ from bot_modules.message_loader import message_loader
 from bot_modules.handlers import (
     handle_message, handle_group_command, handle_dynamic_command,
     start_command, shop_command, cart_command, orders_command, help_command,
-    request_command, closerequest_command, requests_command
+    request_command, closerequest_command, requests_command, clear_command
 )
 from bot_modules.callbacks import handle_callback
 
@@ -33,6 +33,7 @@ async def register_dynamic_commands(application):
             '/cart': cart_command,
             '/orders': orders_command,
             '/help': help_command,
+            '/clear': clear_command,
             '/request': request_command,
             '/closerequest': closerequest_command,
             '/requests': requests_command
@@ -110,6 +111,13 @@ async def register_dynamic_commands(application):
                     registered_commands.add(alias_name)
                     logger.info(f"    └─ Alias /{alias_name}")
         
+        clear_handler = CommandHandler(
+            "clear",
+            clear_command,
+            filters=filters.ChatType.PRIVATE
+        )
+        application.add_handler(clear_handler)
+        
         request_handler = CommandHandler(
             "request",
             request_command
@@ -129,7 +137,7 @@ async def register_dynamic_commands(application):
         )
         application.add_handler(requests_handler)
         
-        logger.info(f"✅ Registration complete: {len(registered_commands) + 3} commands")
+        logger.info(f"✅ Registration complete: {len(registered_commands) + 4} commands")
         return True
         
     except Exception as e:
@@ -154,6 +162,12 @@ def register_fallback_commands(application):
     ))
     
     application.add_handler(CommandHandler(
+        "clear",
+        clear_command,
+        filters=filters.ChatType.PRIVATE
+    ))
+    
+    application.add_handler(CommandHandler(
         "request",
         request_command
     ))
@@ -169,7 +183,7 @@ def register_fallback_commands(application):
         filters=filters.ChatType.PRIVATE
     ))
     
-    logger.info("Registered 5 fallback commands (/start, /help, /request, /closerequest, /requests)")
+    logger.info("Registered 6 fallback commands (/start, /help, /clear, /request, /closerequest, /requests)")
 
 async def post_init(application):
     try:
@@ -237,9 +251,10 @@ def main():
             logger.info("📅 Auto-reload scheduled every 5 minutes")
         
         logger.info("="*50)
-        logger.info("🍕💪 AnabolicPizza Bot - WITH REQUESTS")
-        logger.info("🔧 Dynamic Loading + Product Requests")
+        logger.info("🍕💪 AnabolicPizza Bot - WITH CLEAR & REQUESTS")
+        logger.info("🔧 Dynamic Loading + Clear Chat + Product Requests")
         logger.info("✅ Buttons will work after restart!")
+        logger.info("🧹 /clear command enabled")
         logger.info("📝 /request, /closerequest, /requests enabled")
         logger.info("🔄 Auto-reload: 5 minutes")
         logger.info("="*50)

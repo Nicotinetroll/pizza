@@ -1,5 +1,5 @@
 """
-Enhanced bot command and message handlers with better UX and VIP support
+Enhanced bot command and message handlers with /clear command
 """
 import asyncio
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -24,17 +24,81 @@ from .keyboards import (
 )
 from .cart_manager import cart_manager
 
-# Setup logger
 logger = logging.getLogger(__name__)
 
-# User states storage for conversation flow
 user_states = {}
-user_context = {}  # Store category context
+user_context = {}
 
-# Add these new command handlers after existing ones
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+    
+    try:
+        message_id = update.message.message_id
+        
+        deleted_count = 0
+        failed_count = 0
+        
+        for msg_id in range(message_id, 0, -1):
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                deleted_count += 1
+                
+                if deleted_count >= 100:
+                    break
+                    
+                if deleted_count % 10 == 0:
+                    await asyncio.sleep(0.5)
+                    
+            except:
+                failed_count += 1
+                if failed_count > 50:
+                    break
+        
+        welcome_text = f"""
+🧹 *Chat Cleared!*
+
+Deleted {deleted_count} messages.
+
+Welcome back, {user.first_name or 'friend'}! 
+Ready to start fresh? Your gains journey continues! 💪
+
+*Quick Actions:*
+"""
+        
+        keyboard = get_main_menu_keyboard()
+        
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=welcome_text,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message="/clear",
+            direction="incoming",
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+        await save_chat_message(
+            telegram_id=user.id,
+            username=user.username,
+            message=welcome_text,
+            direction="outgoing"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in clear command: {e}")
+        await update.message.reply_text(
+            "Unable to clear all messages. Some messages may be too old to delete.",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /support command with contact info"""
     user = update.effective_user
     
     support_text = """
@@ -64,7 +128,6 @@ _"Customer service so good, even your liver will thank us!"_
     
     keyboard = get_main_menu_keyboard()
     
-    # Save for chat history
     await save_chat_message(
         telegram_id=user.id,
         username=user.username,
@@ -84,7 +147,6 @@ _"Customer service so good, even your liver will thank us!"_
     await update.message.reply_text(support_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def shipping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /shipping command with delivery info"""
     user = update.effective_user
     
     shipping_text = """
@@ -129,7 +191,6 @@ _"So stealthy, even your muscles won't know it's coming!"_ 💨
     await update.message.reply_text(shipping_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def cycles_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /cycles command with cycle advice"""
     user = update.effective_user
     
     cycles_text = """
@@ -177,7 +238,6 @@ _"Eat clen, tren hard, anavar give up!"_
     await update.message.reply_text(cycles_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def gains_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /gains command with motivation"""
     user = update.effective_user
     
     gains_text = """
@@ -227,7 +287,6 @@ Ready to transcend humanity? 🚀
     await update.message.reply_text(gains_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def natty_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /natty command - the ultimate joke"""
     user = update.effective_user
     
     natty_text = """
@@ -278,7 +337,6 @@ _"The only thing natural about bodybuilding is the lies we tell!"_
     await update.message.reply_text(natty_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle commands in group chats with database settings"""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from .config import BOT_USERNAME
     from .message_loader import message_loader
@@ -328,13 +386,9 @@ async def handle_group_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     return
 
-# IMPORTANT: Direct notification to frontend
 async def notify_frontend_new_message(telegram_id: int):
-    """Send direct notification to frontend about new message"""
     try:
-        # Create a simple HTTP request to trigger frontend refresh
         async with aiohttp.ClientSession() as session:
-            # This endpoint will be added to main.py
             async with session.post(
                 'http://localhost:8000/api/chat/notify-new-message',
                 json={'telegram_id': telegram_id}
@@ -347,7 +401,6 @@ async def notify_frontend_new_message(telegram_id: int):
         logger.error(f"Error notifying frontend: {e}")
 
 async def save_chat_message(telegram_id: int, username: str, message: str, direction: str = "incoming", first_name: str = None, last_name: str = None):
-    """Save chat message to database and notify frontend"""
     try:
         from datetime import datetime
         
@@ -366,11 +419,9 @@ async def save_chat_message(telegram_id: int, username: str, message: str, direc
         message_doc["_id"] = str(result.inserted_id)
         logger.info(f"Saved {direction} message from {telegram_id}: {message[:50]}...")
         
-        # IMPORTANT: Notify frontend directly
         if direction == "incoming":
             await notify_frontend_new_message(telegram_id)
         
-        # Still try WebSocket broadcast for backwards compatibility
         try:
             import sys
             import os
@@ -401,27 +452,19 @@ async def save_chat_message(telegram_id: int, username: str, message: str, direc
     except Exception as e:
         logger.error(f"Error saving chat message: {e}")
 
-# Update the start_command function in backend/bot_modules/handlers.py
-# Replace the existing start_command function with this:
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command with warm welcome"""
     user = update.effective_user
     
-    # Check maintenance mode
     if await message_loader.is_maintenance_mode():
         maintenance_msg = await message_loader.get_maintenance_message()
         await update.message.reply_text(maintenance_msg, parse_mode='Markdown')
         return
     
-    # Load settings
     settings = await message_loader.load_settings()
     
-    # Add delay if configured
     if settings.get("welcome_delay", 0) > 0:
         await asyncio.sleep(settings["welcome_delay"])
     
-    # Show typing indicator
     if settings.get("typing_delay", 0) > 0:
         await context.bot.send_chat_action(
             chat_id=update.effective_chat.id, 
@@ -429,7 +472,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await asyncio.sleep(settings["typing_delay"])
     
-    # Save incoming command ONLY if it's from user message, not callback
     if update.message:
         await save_chat_message(
             telegram_id=user.id,
@@ -440,7 +482,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             last_name=user.last_name
         )
     
-    # Save user to database
     await create_or_update_user({
         "telegram_id": user.id,
         "username": user.username,
@@ -448,28 +489,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "last_name": user.last_name
     })
     
-    # Get user stats and VIP status
     stats = await get_user_stats(user.id)
     vip_status = await get_user_vip_status(user.id)
     
-    # Get welcome message from database
     welcome_text = await message_loader.get_message(
         "welcome",
         name=user.first_name or "Bro"
     )
     
-    # Add returning customer message
     if stats["total_orders"] > 0:
         welcome_text += f"\n🎉 *Welcome back!* Orders: {stats['total_orders']}"
     
-    # Add VIP status
     if vip_status["is_vip"]:
         welcome_text += f"\n👑 *VIP Member* - {vip_status['discount']}% OFF on everything!"
     
-    # ALWAYS GET THE KEYBOARD - THIS IS THE FIX!
     keyboard = get_main_menu_keyboard()
     
-    # Save outgoing message ONLY if it's from user message
     if update.message:
         await save_chat_message(
             telegram_id=user.id,
@@ -477,17 +512,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message=welcome_text,
             direction="outgoing"
         )
-        # ALWAYS send with keyboard when replying to message
         await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
     elif update.callback_query:
-        # For callback queries, also always include keyboard
         await update.callback_query.edit_message_text(welcome_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /shop command - show categories"""
     user = update.effective_user
     
-    # Save incoming command
     await save_chat_message(
         telegram_id=user.id,
         username=user.username,
@@ -500,7 +531,6 @@ async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_categories(update, context)
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show product categories"""
     categories = await get_active_categories()
     
     if not categories:
@@ -510,7 +540,6 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = MESSAGES["shop_categories"]
         keyboard = get_categories_keyboard(categories)
     
-    # Save outgoing message if from command
     if update.message:
         user = update.effective_user
         await save_chat_message(
@@ -529,14 +558,11 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def show_category_products(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str):
-    """Show products in a category"""
     query = update.callback_query
     user_id = update.effective_user.id
     
-    # Store category context
     user_context[user_id] = {"category_id": category_id}
     
-    # Get VIP status for pricing
     vip_status = await get_user_vip_status(user_id)
     
     products = await get_products_by_category(category_id, vip_discount=vip_status["discount"])
@@ -545,7 +571,6 @@ async def show_category_products(update: Update, context: ContextTypes.DEFAULT_T
         text = MESSAGES["category_empty"]
         keyboard = get_back_keyboard("shop")
     else:
-        # Get category name for display
         from .database import get_category_by_id
         category = await get_category_by_id(category_id)
         
@@ -562,11 +587,9 @@ async def show_category_products(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, product_id: str):
-    """Show detailed product view with simplified quantity selector"""
     query = update.callback_query
     user_id = update.effective_user.id
     
-    # Get VIP status
     vip_status = await get_user_vip_status(user_id)
     
     product = await get_product_by_id(product_id, vip_discount=vip_status["discount"])
@@ -574,18 +597,14 @@ async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("Product not found! 🤷", reply_markup=get_back_keyboard("shop"))
         return
     
-    # Get current quantity selection (default 1)
     quantity = cart_manager.get_quantity(user_id, product_id)
     
-    # Check if already in cart
     cart = cart_manager.get_cart(user_id)
     in_cart = cart.get(product_id, {}).get('quantity', 0)
     
-    # Build detailed product text (compact version)
     text = f"🏷️ *{product['name']}*\n"
     text += f"_{product['description']}_\n\n"
     
-    # Show price with VIP discount if applicable
     if product.get("has_vip_discount"):
         text += f"💰 *Price:* ~${product['original_price']:.2f}~ ${product['price_usdt']:.2f}\n"
         text += f"👑 *VIP {vip_status['discount']}% OFF!*\n"
@@ -598,7 +617,6 @@ async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     if in_cart > 0:
         text += f"✅ *In cart:* {in_cart}\n"
     
-    # Add stock info
     stock = product.get('stock_quantity', 999)
     if stock < 10:
         text += f"⚠️ *Only {stock} left!*\n"
@@ -608,14 +626,12 @@ async def show_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
     except:
-        pass  # Ignore if message is identical
+        pass
 
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show shopping cart with better formatting"""
     user_id = update.effective_user.id
     cart = cart_manager.get_cart(user_id)
     
-    # Get VIP status
     vip_status = await get_user_vip_status(user_id)
     
     if not cart:
@@ -626,7 +642,6 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total = 0
         
         for product_id, item in cart.items():
-            # Apply VIP discount to cart items
             price = item['price']
             if vip_status["is_vip"]:
                 from .database import calculate_vip_price
@@ -652,10 +667,8 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def cart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /cart command"""
     user = update.effective_user
     
-    # Save incoming command
     await save_chat_message(
         telegram_id=user.id,
         username=user.username,
@@ -668,11 +681,9 @@ async def cart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_cart(update, context)
 
 async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /orders command with better formatting"""
     user = update.effective_user
     user_id = user.id
     
-    # Save incoming command
     await save_chat_message(
         telegram_id=user_id,
         username=user.username,
@@ -696,7 +707,7 @@ async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text += "\n\n*Recent orders:*\n"
         
-        for order in orders[:5]:  # Show only 5 recent orders
+        for order in orders[:5]:
             status_emoji = {
                 "pending": "⏳", 
                 "paid": "💰", 
@@ -712,7 +723,6 @@ async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
     ])
     
-    # Save outgoing message
     await save_chat_message(
         telegram_id=user_id,
         username=user.username,
@@ -723,16 +733,13 @@ async def orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command"""
     user = update.effective_user
     
-    # Check maintenance mode
     if await message_loader.is_maintenance_mode():
         maintenance_msg = await message_loader.get_maintenance_message()
         await update.message.reply_text(maintenance_msg, parse_mode='Markdown')
         return
     
-    # Save incoming command
     await save_chat_message(
         telegram_id=user.id,
         username=user.username,
@@ -742,12 +749,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_name=user.last_name
     )
     
-    # Get help message from database
     help_text = await message_loader.get_message("help")
     
     keyboard = get_main_menu_keyboard()
     
-    # Save outgoing message
     await save_chat_message(
         telegram_id=user.id,
         username=user.username,
@@ -759,17 +764,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(help_text, parse_mode='Markdown', reply_markup=keyboard)
     elif update.callback_query:
         await update.callback_query.edit_message_text(help_text, parse_mode='Markdown', reply_markup=keyboard)
-        
 
 async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """TRULY universal handler - everything from database"""
     if not update.message or not update.message.text:
         return
     
     user = update.effective_user
     command = update.message.text.split()[0].lower()
     
-    # SPECIAL HANDLING FOR CORE COMMANDS - FIX THE KEYBOARD ISSUE
     if command == '/start':
         await start_command(update, context)
         return
@@ -785,18 +787,18 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
     elif command == '/help':
         await help_command(update, context)
         return
+    elif command == '/clear':
+        await clear_command(update, context)
+        return
     
-    # For other commands, get from database
     response = await message_loader.get_command_response(command)
     
     if response:
-        # Replace variables
         if user:
             response = response.replace('{name}', user.first_name or 'Friend')
             response = response.replace('{username}', f"@{user.username}" if user.username else 'User')
             response = response.replace('{telegram_id}', str(user.id))
         
-        # CHECK IF THIS IS A MENU COMMAND THAT NEEDS KEYBOARD
         keyboard = None
         if any(keyword in command for keyword in ['start', 'menu', 'home', 'help']):
             keyboard = get_main_menu_keyboard()
@@ -806,13 +808,11 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
                 [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
             ])
         
-        # Send response with or without keyboard
         if keyboard:
             await update.message.reply_text(response, reply_markup=keyboard, parse_mode='Markdown')
         else:
             await update.message.reply_text(response, parse_mode='Markdown')
         
-        # Save to history if private
         if update.effective_chat.type == 'private':
             await save_chat_message(
                 telegram_id=user.id,
@@ -830,7 +830,6 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
             )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages based on user state"""
     user_id = update.effective_user.id
     username = update.effective_user.username or f"user{user_id}"
     first_name = update.effective_user.first_name
@@ -838,7 +837,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     state = user_states.get(user_id)
     
-    # Save incoming message
     await save_chat_message(
         telegram_id=user_id,
         username=username,
@@ -853,38 +851,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == "waiting_referral":
         await handle_referral_input(update, context, text)
     else:
-        # JUST IGNORE random messages - don't respond!
         pass
-        # Removed the annoying fallback message completely
 
 async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str):
-    """Handle city input during checkout"""
     user_id = update.effective_user.id
+    message_id = context.user_data.get('checkout_message_id')
     
     if len(city) < 2:
-        await update.message.reply_text("❌ Enter a valid city name (min 2 characters):")
+        await update.message.delete()
+        if message_id:
+            await context.bot.edit_message_text(
+                chat_id=user_id,
+                message_id=message_id,
+                text="❌ Enter a valid city name (min 2 characters):",
+                parse_mode='Markdown'
+            )
         return
     
-    # Validate city doesn't contain suspicious characters
     if any(char in city for char in ['<', '>', '/', '\\', '@', '#']):
-        await update.message.reply_text("❌ Enter a valid city name:")
+        await update.message.delete()
+        if message_id:
+            await context.bot.edit_message_text(
+                chat_id=user_id,
+                message_id=message_id,
+                text="❌ Enter a valid city name:",
+                parse_mode='Markdown'
+            )
         return
     
     context.user_data['delivery_city'] = city
     user_states[user_id] = "waiting_referral"
     
-    # Ask for referral code
     country = context.user_data.get('delivery_country', 'Unknown')
     
     response_text = f"✅ Shipping to: {city}, {country}\n" + MESSAGES["ask_referral"]
     
-    await update.message.reply_text(
-        response_text,
-        reply_markup=get_referral_keyboard(),
-        parse_mode='Markdown'
-    )
+    await update.message.delete()
     
-    # Save bot response
+    if message_id:
+        await context.bot.edit_message_text(
+            chat_id=user_id,
+            message_id=message_id,
+            text=response_text,
+            reply_markup=get_referral_keyboard(),
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            response_text,
+            reply_markup=get_referral_keyboard(),
+            parse_mode='Markdown'
+        )
+    
     await save_chat_message(
         telegram_id=user_id,
         username=update.effective_user.username,
@@ -893,20 +911,18 @@ async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     )
 
 async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str):
-    """Handle referral code input"""
     user_id = update.effective_user.id
+    message_id = context.user_data.get('checkout_message_id')
     
-    # Check if user has VIP discount
     vip_status = await get_user_vip_status(user_id)
     
-    # Validate referral code
     referral = await validate_referral_code(code)
     
+    await update.message.delete()
+    
     if referral:
-        # Calculate discount
         total = context.user_data.get('checkout_total', 0)
         
-        # If VIP, show that VIP discount is better
         if vip_status["is_vip"] and vip_status["discount"] > 0:
             response_text = (
                 f"👑 *You already have VIP {vip_status['discount']}% discount!*\n"
@@ -914,26 +930,32 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
                 + MESSAGES["payment_select"]
             )
             
-            await update.message.reply_text(
-                response_text,
-                reply_markup=get_payment_keyboard(),
-                parse_mode='Markdown'
-            )
+            if message_id:
+                await context.bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=message_id,
+                    text=response_text,
+                    reply_markup=get_payment_keyboard(),
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    response_text,
+                    reply_markup=get_payment_keyboard(),
+                    parse_mode='Markdown'
+                )
             
             context.user_data['referral_code'] = None
             context.user_data['discount_amount'] = 0
             context.user_data['final_total'] = total
             context.user_data['vip_discount_applied'] = True
         else:
-            # Apply referral discount
             discount_amount, new_total = await calculate_discount(total, referral)
             
-            # Store in context
             context.user_data['referral_code'] = code.upper()
             context.user_data['discount_amount'] = discount_amount
             context.user_data['final_total'] = new_total
             
-            # Show success message
             discount_text = f"{referral['discount_value']}%"
             if referral['discount_type'] == 'fixed':
                 discount_text = f"${referral['discount_value']:.2f}"
@@ -951,13 +973,21 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
             
             response_text = text + "\n" + MESSAGES["payment_select"]
             
-            await update.message.reply_text(
-                response_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
+            if message_id:
+                await context.bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=message_id,
+                    text=response_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    response_text,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
         
-        # Save bot response
         await save_chat_message(
             telegram_id=user_id,
             username=update.effective_user.username,
@@ -965,16 +995,23 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
             direction="outgoing"
         )
     else:
-        # Invalid code
         response_text = MESSAGES["referral_invalid"]
         
-        await update.message.reply_text(
-            response_text,
-            reply_markup=get_referral_keyboard(),
-            parse_mode='Markdown'
-        )
+        if message_id:
+            await context.bot.edit_message_text(
+                chat_id=user_id,
+                message_id=message_id,
+                text=response_text,
+                reply_markup=get_referral_keyboard(),
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                response_text,
+                reply_markup=get_referral_keyboard(),
+                parse_mode='Markdown'
+            )
         
-        # Save bot response
         await save_chat_message(
             telegram_id=user_id,
             username=update.effective_user.username,
@@ -983,7 +1020,7 @@ async def handle_referral_input(update: Update, context: ContextTypes.DEFAULT_TY
         )
     
     user_states[user_id] = None
-    
+
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     

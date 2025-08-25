@@ -1,5 +1,5 @@
 """
-Enhanced callback query handler with categories and notifications - PRODUCTION VERSION
+Enhanced callback query handler with single-message payment flow
 """
 import asyncio
 import secrets
@@ -30,14 +30,12 @@ from .public_notifications import public_notifier
 logger = logging.getLogger(__name__)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle all callback queries with improved flow"""
     query = update.callback_query
     await query.answer()
     
     user_id = update.effective_user.id
     data = query.data
     
-    # Main navigation
     if data == "home":
         await start_command(update, context)
     
@@ -53,12 +51,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "orders":
         await show_orders(update, context)
     
-    # Category browsing
     elif data.startswith("cat_"):
         category_id = data.replace("cat_", "")
         await show_category_products(update, context, category_id)
     
-    # Product viewing
     elif data.startswith("view_"):
         product_id = data.replace("view_", "")
         await show_product_detail(update, context, product_id)
@@ -70,19 +66,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await show_categories(update, context)
     
-    # Quantity adjustment
     elif data.startswith("qty_"):
         await handle_quantity_change(update, context, data)
     
-    # Add to cart
     elif data.startswith("add_"):
         await handle_add_to_cart(update, context, data)
     
-    # Cart management
     elif data == "clear_cart":
         await handle_clear_cart(update, context)
     
-    # Checkout flow
     elif data == "checkout_start":
         await handle_checkout_start(update, context)
     
@@ -92,23 +84,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("country_"):
         await handle_country_selection(update, context, data)
     
-    # Referral handling
     elif data == "skip_referral":
         await handle_skip_referral(update, context)
     
-    # Payment
     elif data.startswith("pay_"):
         await handle_payment(update, context, data)
     
-    # Payment retry
     elif data.startswith("retry_pay_"):
         await handle_retry_payment(update, context, data)
     
-    # Payment check
     elif data.startswith("check_pay_"):
         await handle_check_payment(update, context, data)
     
-    # Support
     elif data == "support":
         support_text = """
 💬 *NEED HELP?*
@@ -137,7 +124,6 @@ _"We're here to help you get massive!"_ 💪
     elif data == "cancel_order":
         await handle_cancel_order(update, context)
     
-    # Fallback payment - explain real reason
     elif data.startswith("fake_pay_"):
         order_id = data.replace("fake_pay_", "")
         await query.edit_message_text(
@@ -153,14 +139,13 @@ _"We're here to help you get massive!"_ 💪
         )
     
     elif data == "noop":
-        pass  # Do nothing for display buttons
+        pass
     
     else:
         logger.warning(f"Unknown callback data: {data}")
         await query.answer("Unknown action", show_alert=False)
 
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user orders in callback"""
     query = update.callback_query
     user_id = update.effective_user.id
     
@@ -189,7 +174,6 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_quantity_change(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle simplified quantity adjustment"""
     query = update.callback_query
     user_id = update.effective_user.id
     
@@ -204,7 +188,6 @@ async def handle_quantity_change(update: Update, context: ContextTypes.DEFAULT_T
     
     new_qty = cart_manager.adjust_quantity(user_id, product_id, adjustment)
     
-    # Show feedback
     if adjustment < 0 and new_qty == 1:
         await query.answer("Minimum quantity is 1!", show_alert=False)
     elif adjustment > 0 and new_qty >= 20:
@@ -212,11 +195,9 @@ async def handle_quantity_change(update: Update, context: ContextTypes.DEFAULT_T
     else:
         await query.answer(f"Quantity: {new_qty}", show_alert=False)
     
-    # Refresh product detail
     await show_product_detail(update, context, product_id)
 
 async def handle_add_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle add to cart with better feedback"""
     query = update.callback_query
     user_id = update.effective_user.id
     product_id = data.replace("add_", "")
@@ -229,10 +210,8 @@ async def handle_add_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE,
     quantity = cart_manager.get_quantity(user_id, product_id)
     cart_manager.add_to_cart(user_id, product_id, product, quantity)
     
-    # Calculate new cart total
     total = cart_manager.get_cart_total(user_id)
     
-    # Show success message
     success_text = MESSAGES.get("product_added", "").format(
         quantity=quantity,
         product_name=product['name'],
@@ -242,10 +221,8 @@ async def handle_add_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if not success_text:
         success_text = f"✅ Added {quantity}x {product['name']} to cart!\nTotal: ${total:.2f}"
     
-    # Show success and go to cart
     await query.answer(f"✅ Added {quantity}x to cart!", show_alert=False)
     
-    # Show updated cart
     await query.edit_message_text(
         success_text,
         parse_mode='Markdown',
@@ -257,7 +234,6 @@ async def handle_add_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE,
     )
 
 async def handle_clear_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle cart clearing with confirmation"""
     query = update.callback_query
     user_id = update.effective_user.id
     
@@ -275,7 +251,6 @@ async def handle_clear_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_checkout_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start checkout process with better flow"""
     query = update.callback_query
     user_id = update.effective_user.id
     cart = cart_manager.get_cart(user_id)
@@ -290,8 +265,8 @@ async def handle_checkout_start(update: Update, context: ContextTypes.DEFAULT_TY
     total = cart_manager.get_cart_total(user_id)
     context.user_data['checkout_cart'] = cart
     context.user_data['checkout_total'] = total
+    context.user_data['checkout_message_id'] = query.message.message_id
     
-    # Build order summary
     order_summary = ""
     for product_id, item in cart.items():
         subtotal = item['price'] * item['quantity']
@@ -309,7 +284,6 @@ async def handle_checkout_start(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(checkout_text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_select_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show country selection"""
     query = update.callback_query
     
     text = MESSAGES.get("ask_location", "📍 *SELECT YOUR COUNTRY*\n\nWhere should we deliver your order?")
@@ -318,7 +292,6 @@ async def handle_select_country(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_country_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle country selection and ask for city"""
     query = update.callback_query
     user_id = update.effective_user.id
     
@@ -332,10 +305,8 @@ async def handle_country_selection(update: Update, context: ContextTypes.DEFAULT
     )
 
 async def handle_skip_referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Skip referral code and go to payment"""
     query = update.callback_query
     
-    # No discount applied
     context.user_data['referral_code'] = None
     context.user_data['discount_amount'] = 0
     context.user_data['final_total'] = context.user_data.get('checkout_total', 0)
@@ -346,7 +317,6 @@ async def handle_skip_referral(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_data: str):
-    """Process payment with NOWPayments - PRODUCTION VERSION"""
     query = update.callback_query
     payment_method = payment_data.replace("pay_", "").upper()
     
@@ -358,7 +328,6 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     referral_code = context.user_data.get('referral_code')
     discount_amount = context.user_data.get('discount_amount', 0)
     
-    # Check minimum amounts
     minimum_amounts = {
         "BTC": 5.0,
         "ETH": 15.0,
@@ -386,13 +355,11 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
         )
         return
     
-    # Show processing message
     await query.edit_message_text(
         "⏳ *Creating payment...*\n\nGenerating your secure payment address...",
         parse_mode='Markdown'
     )
     
-    # Create order in database first
     order_items = []
     for product_id, item in cart.items():
         order_items.append({
@@ -421,16 +388,13 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
     order_id = await create_order(order_data)
     order = await get_order_by_id(order_id)
     
-    # Store order number for reference
     context.user_data['current_order_number'] = order['order_number']
     context.user_data['current_order_id'] = str(order_id)
     
-    # Try to create REAL payment with NOWPayments
     payment_created = False
     payment_error_reason = "Unknown error"
     
     try:
-        # Load environment variables
         env_path = Path('/opt/telegram-shop-bot/.env')
         if env_path.exists():
             with open(env_path) as f:
@@ -447,18 +411,15 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
         else:
             logger.info(f"Creating real payment for order {order['order_number']}")
             
-            # Import NOWPayments gateway
             sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             from nowpayments_gateway import NOWPaymentsGateway
             
-            # Create gateway instance
             payment_gateway = NOWPaymentsGateway(
                 api_key=api_key,
                 ipn_secret=os.environ.get("NOWPAYMENTS_IPN_SECRET", ""),
                 sandbox=os.environ.get("NOWPAYMENTS_SANDBOX", "false").lower() == "true"
             )
             
-            # Create payment request
             payment_request = {
                 "order_id": str(order_id),
                 "order_number": order['order_number'],
@@ -468,13 +429,11 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
                 "description": f"Order {order['order_number']}"
             }
             
-            # Create payment
             payment_result = await payment_gateway.create_payment(payment_request)
             
             if payment_result.get("success"):
                 payment_created = True
                 
-                # Update order with payment details
                 await update_order_payment_details(order_id, {
                     "payment_id": payment_result["payment_id"],
                     "pay_address": payment_result["pay_address"],
@@ -482,14 +441,11 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
                     "pay_currency": payment_result["pay_currency"]
                 })
                 
-                # Clear cart
                 cart_manager.clear_cart(user_id)
                 
-                # Apply referral code if used
                 if referral_code:
                     await apply_referral_code(referral_code)
                 
-                # Store payment details for copy function
                 context.user_data['payment_details'] = {
                     'payment_id': payment_result["payment_id"],
                     'address': payment_result["pay_address"],
@@ -497,7 +453,6 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
                     'currency': payment_result["pay_currency"].upper()
                 }
                 
-                # Format payment instructions with copyable text
                 payment_text = f"""
 💰 *PAYMENT INSTRUCTIONS*
 
@@ -526,7 +481,6 @@ Amount: **${total:.2f}**
 🔄 *Status:* Waiting for payment...
 """
                 
-                # Simplified keyboard without copy buttons
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton("✅ I've Sent Payment", callback_data=f"check_pay_{payment_result['payment_id']}")],
                     [
@@ -537,17 +491,15 @@ Amount: **${total:.2f}**
                 
                 await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode='Markdown')
                 
-                # Store message_id for updating
                 message_id = query.message.message_id
                 
-                # Start background payment checker with message_id
                 asyncio.create_task(
                     auto_check_payment_status(
                         context.bot,
                         user_id,
                         payment_result['payment_id'],
                         order['order_number'],
-                        message_id  # Pass message_id to update same message
+                        message_id
                     )
                 )
                 return
@@ -562,11 +514,9 @@ Amount: **${total:.2f}**
         import traceback
         traceback.print_exc()
     
-    # If payment creation failed, show the actual error reason
     if not payment_created:
         logger.warning(f"Payment creation failed for order {order['order_number']}: {payment_error_reason}")
         
-        # Different messages based on error
         if "API key not configured" in payment_error_reason:
             error_title = "⚠️ *PAYMENT GATEWAY NOT CONFIGURED*"
             error_desc = "The payment system is not properly configured. Please contact support for manual payment instructions."
@@ -602,54 +552,19 @@ Your order has been saved and you can retry payment anytime.
         
         await query.edit_message_text(error_text, reply_markup=keyboard, parse_mode='Markdown')
 
-async def handle_copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle copy address button"""
-    query = update.callback_query
-    payment_details = context.user_data.get('payment_details', {})
-    
-    if payment_details and payment_details.get('address'):
-        # Send address as copyable message
-        await context.bot.send_message(
-            chat_id=update.effective_user.id,
-            text=f"📋 *Crypto Address (tap & hold to copy):*\n\n`{payment_details['address']}`",
-            parse_mode='Markdown'
-        )
-        await query.answer("✅ Address sent - tap to copy!", show_alert=False)
-    else:
-        await query.answer("❌ Address not found", show_alert=True)
-
-async def handle_copy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle copy amount button"""
-    query = update.callback_query
-    payment_details = context.user_data.get('payment_details', {})
-    
-    if payment_details and payment_details.get('amount'):
-        # Send amount as copyable message
-        await context.bot.send_message(
-            chat_id=update.effective_user.id,
-            text=f"📋 *Exact Amount (tap & hold to copy):*\n\n`{payment_details['amount']}` {payment_details.get('currency', '')}",
-            parse_mode='Markdown'
-        )
-        await query.answer("✅ Amount sent - tap to copy!", show_alert=False)
-    else:
-        await query.answer("❌ Amount not found", show_alert=True)
-
 async def handle_retry_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle payment retry"""
     query = update.callback_query
     parts = data.replace("retry_pay_", "").split("_")
     payment_method = parts[0].upper()
     order_id = "_".join(parts[1:]) if len(parts) > 1 else None
     
     if order_id:
-        # Reload order from database
         order = await get_order_by_id(order_id)
         if order:
             context.user_data['current_order_id'] = order_id
             context.user_data['current_order_number'] = order['order_number']
             context.user_data['final_total'] = order['total_usdt']
             
-            # Retry payment
             await handle_payment(update, context, f"pay_{payment_method.lower()}")
         else:
             await query.answer("Order not found!", show_alert=True)
@@ -657,13 +572,11 @@ async def handle_retry_payment(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer("Invalid retry request", show_alert=True)
 
 async def handle_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Handle manual payment status check"""
     query = update.callback_query
     payment_id = data.replace("check_pay_", "")
     
     await query.answer("Checking payment status...", show_alert=False)
     
-    # Try to check with NOWPayments
     try:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from nowpayments_gateway import payment_gateway
@@ -672,7 +585,6 @@ async def handle_check_payment(update: Update, context: ContextTypes.DEFAULT_TYP
             status = await payment_gateway.check_payment_status(payment_id)
             
             if status and status.get("payment_status") == "finished":
-                # Get order number
                 order_number = context.user_data.get('current_order_number', 'YOUR-ORDER')
                 
                 success_text = f"""
@@ -712,7 +624,6 @@ _Your gains are on the way!_ 🍕💉
         await query.answer("Unable to check payment status", show_alert=True)
 
 async def show_payment_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show payment help"""
     query = update.callback_query
     
     help_text = """
@@ -747,11 +658,9 @@ Need more help? Contact support!
     )
 
 async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel current order"""
     query = update.callback_query
     user_id = update.effective_user.id
     
-    # Clear user states and context
     user_states.pop(user_id, None)
     context.user_data.clear()
     
@@ -766,11 +675,7 @@ async def handle_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='Markdown'
     )
 
-# Nájdite funkciu auto_check_payment_status v callbacks.py (okolo riadku 880)
-# a nahraďte ju touto verziou:
-
 async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, order_number: str, message_id: int = None):
-    """Background task to check payment status - UPDATES EXISTING MESSAGE"""
     try:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from nowpayments_gateway import payment_gateway
@@ -781,8 +686,8 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
     if not payment_gateway:
         return
     
-    max_checks = 80  # 20 minutes / 15 seconds = 80 checks
-    check_interval = 15  # ZRÝCHLENÉ na 15 sekúnd!
+    max_checks = 80
+    check_interval = 15
     already_notified = False
     last_status = "waiting"
     
@@ -795,11 +700,9 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
             if status:
                 current_status = status.get("payment_status", "waiting")
                 
-                # Update správy pri KAŽDEJ zmene statusu
                 if current_status != last_status and message_id:
                     last_status = current_status
                     
-                    # Status emoji a text
                     status_map = {
                         "waiting": ("⏳", "Waiting for payment..."),
                         "confirming": ("🔄", "Payment detected! Confirming..."),
@@ -812,7 +715,6 @@ async def auto_check_payment_status(bot, telegram_id: int, payment_id: str, orde
                     
                     emoji, status_text = status_map.get(current_status, ("❓", current_status))
                     
-                    # Update existujúcej správy so statusom
                     if current_status not in ["finished", "failed", "expired"]:
                         update_text = f"""
 💰 *PAYMENT INSTRUCTIONS*
@@ -837,9 +739,8 @@ Order: `{order_number}`
                                 parse_mode='Markdown'
                             )
                         except:
-                            pass  # Ignore if message unchanged
+                            pass
                 
-                # Payment CONFIRMED
                 if current_status == "finished" and not already_notified:
                     already_notified = True
                     
@@ -860,7 +761,6 @@ Thank you for your order! 💪
 _Time to get massive! Your gains are on the way!_ 🍕💉
 """
                     
-                    # Keyboard s navigáciou
                     from telegram import InlineKeyboardMarkup, InlineKeyboardButton
                     keyboard = InlineKeyboardMarkup([
                         [InlineKeyboardButton("📦 My Orders", callback_data="orders")],
@@ -868,7 +768,6 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                         [InlineKeyboardButton("🍕 Order More", callback_data="shop")]
                     ])
                     
-                    # Update EXISTUJÚCEJ správy (nie nová!)
                     if message_id:
                         try:
                             await bot.edit_message_text(
@@ -879,7 +778,6 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                                 parse_mode='Markdown'
                             )
                         except:
-                            # Ak edit zlyhá, pošli novú
                             await bot.send_message(
                                 chat_id=telegram_id,
                                 text=success_text,
@@ -897,7 +795,6 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                     logger.info(f"✅ Payment auto-confirmed for {order_number}")
                     break
                 
-                # Partial payment
                 elif current_status == "partially_paid" and not already_notified:
                     actually_paid = float(status.get("actually_paid", 0))
                     expected = float(status.get("pay_amount", 0))
@@ -914,7 +811,6 @@ Expected: `{expected:.8f}`
 
 Please send the remaining amount to the same address.
 """
-                    # Update existujúcej správy
                     if message_id:
                         try:
                             await bot.edit_message_text(
@@ -926,7 +822,6 @@ Please send the remaining amount to the same address.
                         except:
                             pass
                 
-                # Payment expired
                 elif current_status == "expired":
                     already_notified = True
                     
@@ -944,7 +839,6 @@ Please create a new order to continue.
                         [InlineKeyboardButton("🏠 Menu", callback_data="home")]
                     ])
                     
-                    # Update existujúcej správy
                     if message_id:
                         try:
                             await bot.edit_message_text(
@@ -966,7 +860,6 @@ Please create a new order to continue.
         except Exception as e:
             logger.error(f"Error in payment check: {e}")
     
-    # Timeout po 20 minútach
     if i == max_checks - 1 and not already_notified:
         timeout_text = f"""
 ⏰ *CHECKING TIMEOUT*
@@ -984,7 +877,6 @@ Contact support if you need help.
             [InlineKeyboardButton("🏠 Menu", callback_data="home")]
         ])
         
-        # Update existujúcej správy
         if message_id:
             try:
                 await bot.edit_message_text(
@@ -1002,9 +894,7 @@ Contact support if you need help.
                     parse_mode='Markdown'
                 )
 
-# Helper function to update order payment details
 async def update_order_payment_details(order_id: str, payment_details: dict):
-    """Update order with NOWPayments payment details"""
     from .database import db
     from bson import ObjectId
     
@@ -1018,88 +908,4 @@ async def update_order_payment_details(order_id: str, payment_details: dict):
                 "payment.currency": payment_details.get("pay_currency")
             }
         }
-    )
-
-# Fallback demo payment handler (for when NOWPayments fails)
-async def handle_demo_payment(update, context, payment_method, order, order_id, total):
-    """Fallback when payment gateway fails - show manual payment instructions"""
-    query = update.callback_query
-    user_id = update.effective_user.id
-    
-    # Manual payment addresses (replace with your real addresses)
-    manual_addresses = {
-        "BTC": "YOUR_MANUAL_BTC_ADDRESS",
-        "ETH": "YOUR_MANUAL_ETH_ADDRESS", 
-        "SOL": "YOUR_MANUAL_SOL_ADDRESS",
-        "USDT": "YOUR_MANUAL_USDT_ADDRESS"
-    }
-    
-    # Calculate crypto amount manually
-    crypto_rates = {"BTC": 65000, "ETH": 3500, "SOL": 150, "USDT": 1}
-    crypto_amount = total / crypto_rates.get(payment_method, 1)
-    
-    # Update order with manual address
-    from .database import db
-    from bson import ObjectId
-    await db.orders.update_one(
-        {"_id": ObjectId(order_id)},
-        {
-            "$set": {
-                "payment.address": manual_addresses.get(payment_method, "CONTACT_SUPPORT"),
-                "payment.manual": True
-            }
-        }
-    )
-    
-    # Clear cart
-    cart_manager.clear_cart(user_id)
-    
-    # Apply referral code if used
-    if context.user_data.get('referral_code'):
-        await apply_referral_code(context.user_data['referral_code'])
-    
-    # Manual payment text
-    manual_text = f"""
-⚠️ *MANUAL PAYMENT MODE*
-
-Order: `{order['order_number']}`
-Amount: **${total:.2f}** (~{crypto_amount:.8f} {payment_method})
-
-Due to payment gateway issues, please use manual payment:
-
-📬 Send to this address:
-`{manual_addresses.get(payment_method, 'CONTACT_SUPPORT')}`
-
-⚠️ **IMPORTANT:**
-• Send EXACT amount
-• Save transaction ID
-• Contact support with order number and transaction ID
-• We'll confirm payment manually within 2-6 hours
-
-━━━━━━━━━━━━━━━━━━━━━
-
-After sending payment, contact support:
-@APizzaSupport
-"""
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
-    ])
-    
-    await query.edit_message_text(manual_text, reply_markup=keyboard, parse_mode='Markdown')
-
-async def handle_fake_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """This function should not be used in production"""
-    query = update.callback_query
-    
-    # In production, redirect to support
-    await query.edit_message_text(
-        "⚠️ *Payment system is currently in maintenance mode*\n\n"
-        "Please contact support for manual payment instructions.",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Contact Support", callback_data="support")],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
-        ])
     )
