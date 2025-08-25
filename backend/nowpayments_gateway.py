@@ -14,6 +14,7 @@ from decimal import Decimal
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,8 @@ class NOWPaymentsGateway:
                             "price_currency": data["price_currency"].upper(),
                             "payment_status": data["payment_status"],
                             "created_at": datetime.utcnow(),
-                            "expiry_estimate": data.get("expiry_estimate_date")
+                            "expiry_estimate": data.get("expiry_estimate_date"),
+                            "last_check": datetime.utcnow()
                         }
                         
                         await self.db.payment_records.insert_one(payment_record)
@@ -199,7 +201,27 @@ class NOWPaymentsGateway:
             }
     
     async def check_payment_status(self, payment_id: str) -> Dict:
+        """Check payment status - USED BY BOT FOR POLLING"""
         try:
+            # First check database for cached status
+            cached = await self.db.payment_records.find_one({"payment_id": payment_id})
+            if cached:
+                # If last check was less than 3 seconds ago, return cached
+                if cached.get("last_check"):
+                    time_diff = (datetime.utcnow() - cached["last_check"]).total_seconds()
+                    if time_diff < 3:
+                        logger.info(f"Returning cached status for {payment_id}: {cached.get('payment_status')}")
+                        return {
+                            "payment_id": payment_id,
+                            "payment_status": cached.get("payment_status", "waiting"),
+                            "actually_paid": float(cached.get("actually_paid", 0)),
+                            "pay_amount": float(cached.get("pay_amount", 0)),
+                            "outcome_amount": float(cached.get("outcome_amount", 0)),
+                            "outcome_currency": cached.get("outcome_currency", "USD"),
+                            "from_cache": True
+                        }
+            
+            # Make API call
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/payment/{payment_id}",
@@ -208,16 +230,20 @@ class NOWPaymentsGateway:
                     if response.status == 200:
                         data = await response.json()
                         
+                        # Update database with new status
                         await self.db.payment_records.update_one(
                             {"payment_id": payment_id},
                             {
                                 "$set": {
                                     "payment_status": data["payment_status"],
                                     "actually_paid": float(data.get("actually_paid", 0)),
-                                    "updated_at": datetime.utcnow()
+                                    "updated_at": datetime.utcnow(),
+                                    "last_check": datetime.utcnow()
                                 }
                             }
                         )
+                        
+                        logger.info(f"API check for {payment_id}: {data['payment_status']}")
                         
                         return {
                             "payment_id": payment_id,
@@ -225,7 +251,8 @@ class NOWPaymentsGateway:
                             "actually_paid": float(data.get("actually_paid", 0)),
                             "pay_amount": float(data.get("pay_amount", 0)),
                             "outcome_amount": float(data.get("outcome_amount", 0)),
-                            "outcome_currency": data.get("outcome_currency", "USD")
+                            "outcome_currency": data.get("outcome_currency", "USD"),
+                            "from_cache": False
                         }
                     else:
                         logger.error(f"Failed to check payment status: {response.status}")
@@ -252,13 +279,15 @@ class NOWPaymentsGateway:
             return False
     
     async def process_ipn_callback(self, payload: Dict, signature: str = None) -> bool:
+        """Process IPN webhook callback from NOWPayments"""
         try:
             payment_id = payload.get("payment_id")
             payment_status = payload.get("payment_status")
             order_number = payload.get("order_id")
             
-            logger.info(f"Processing IPN for payment {payment_id}: status={payment_status}")
+            logger.info(f"IPN WEBHOOK: Payment {payment_id} status changed to {payment_status}")
             
+            # Update payment record with webhook data
             await self.db.payment_records.update_one(
                 {"payment_id": payment_id},
                 {
@@ -268,7 +297,20 @@ class NOWPaymentsGateway:
                         "outcome_amount": float(payload.get("outcome_amount", 0)),
                         "outcome_currency": payload.get("outcome_currency"),
                         "updated_at": datetime.utcnow(),
-                        "ipn_data": payload
+                        "last_check": datetime.utcnow(),
+                        "ipn_data": payload,
+                        "webhook_received": True
+                    }
+                }
+            )
+            
+            # Update order with latest payment status
+            await self.db.orders.update_one(
+                {"order_number": order_number},
+                {
+                    "$set": {
+                        "payment.latest_status": payment_status,
+                        "payment.last_update": datetime.utcnow()
                     }
                 }
             )
@@ -310,11 +352,13 @@ class NOWPaymentsGateway:
                         "payment.transaction_id": payment_id,
                         "payment.actually_paid": float(payment_data.get("actually_paid", 0)),
                         "payment.outcome_amount": float(payment_data.get("outcome_amount", 0)),
-                        "payment.outcome_currency": payment_data.get("outcome_currency")
+                        "payment.outcome_currency": payment_data.get("outcome_currency"),
+                        "payment.latest_status": "finished"
                     }
                 }
             )
             
+            # Update product sold counts
             if order.get("items"):
                 for item in order["items"]:
                     await self.db.products.update_one(
@@ -322,6 +366,7 @@ class NOWPaymentsGateway:
                         {"$inc": {"sold_count": item.get("quantity", 1)}}
                     )
             
+            # Update user stats
             await self.db.users.update_one(
                 {"telegram_id": order["telegram_id"]},
                 {
@@ -332,6 +377,7 @@ class NOWPaymentsGateway:
                 }
             )
             
+            # Try to update Telegram message
             message_id = order.get("payment", {}).get("message_id")
             if message_id:
                 try:
@@ -375,9 +421,8 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                     
                 except Exception as e:
                     logger.error(f"Could not edit message: {e}")
-            else:
-                logger.warning(f"No message_id found for order {order_number}")
             
+            # Send public notification
             try:
                 from bot_modules.public_notifications import public_notifier
                 order["status"] = "paid"
@@ -403,42 +448,11 @@ _Time to get massive! Your gains are on the way!_ 🍕💉
                     "$set": {
                         "payment.status": "partial",
                         "payment.actually_paid": actually_paid,
-                        "payment.note": f"Partial payment: {actually_paid}/{expected}"
+                        "payment.note": f"Partial payment: {actually_paid}/{expected}",
+                        "payment.latest_status": "partially_paid"
                     }
                 }
             )
-            
-            order = await self.db.orders.find_one({"order_number": order_number})
-            if order:
-                message_id = order.get("payment", {}).get("message_id")
-                if message_id:
-                    try:
-                        from bot_modules.public_notifications import public_notifier
-                        bot = public_notifier.bot
-                        
-                        remaining = expected - actually_paid
-                        
-                        partial_text = f"""
-⚠️ *PARTIAL PAYMENT RECEIVED*
-
-Order: `{order_number}`
-
-Received: `{actually_paid:.8f}`
-Expected: `{expected:.8f}`
-**Need: `{remaining:.8f}`**
-
-Please send the remaining amount to the same address.
-"""
-                        
-                        await bot.edit_message_text(
-                            chat_id=order["telegram_id"],
-                            message_id=message_id,
-                            text=partial_text,
-                            parse_mode='Markdown'
-                        )
-                        
-                    except Exception as e:
-                        logger.error(f"Could not edit message for partial payment: {e}")
             
             logger.info(f"Order {order_number} partial payment: {actually_paid}/{expected}")
                 
@@ -452,46 +466,11 @@ Please send the remaining amount to the same address.
                 {
                     "$set": {
                         "payment.status": "expired",
-                        "status": "cancelled"
+                        "status": "cancelled",
+                        "payment.latest_status": "expired"
                     }
                 }
             )
-            
-            order = await self.db.orders.find_one({"order_number": order_number})
-            if order:
-                message_id = order.get("payment", {}).get("message_id")
-                if message_id:
-                    try:
-                        from bot_modules.public_notifications import public_notifier
-                        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-                        
-                        bot = public_notifier.bot
-                        
-                        expired_text = f"""
-❌ *PAYMENT EXPIRED*
-
-Order: `{order_number}`
-
-The payment window has expired.
-Please create a new order to continue.
-"""
-                        
-                        keyboard = InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
-                            [InlineKeyboardButton("💬 Support", callback_data="support")],
-                            [InlineKeyboardButton("🏠 Menu", callback_data="home")]
-                        ])
-                        
-                        await bot.edit_message_text(
-                            chat_id=order["telegram_id"],
-                            message_id=message_id,
-                            text=expired_text,
-                            reply_markup=keyboard,
-                            parse_mode='Markdown'
-                        )
-                        
-                    except Exception as e:
-                        logger.error(f"Could not edit message for expired payment: {e}")
             
             logger.info(f"Order {order_number} payment expired")
         except Exception as e:
@@ -504,46 +483,11 @@ Please create a new order to continue.
                 {
                     "$set": {
                         "payment.status": "failed",
-                        "status": "cancelled"
+                        "status": "cancelled",
+                        "payment.latest_status": "failed"
                     }
                 }
             )
-            
-            order = await self.db.orders.find_one({"order_number": order_number})
-            if order:
-                message_id = order.get("payment", {}).get("message_id")
-                if message_id:
-                    try:
-                        from bot_modules.public_notifications import public_notifier
-                        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-                        
-                        bot = public_notifier.bot
-                        
-                        failed_text = f"""
-❌ *PAYMENT FAILED*
-
-Order: `{order_number}`
-
-The payment could not be processed.
-Please try again or contact support.
-"""
-                        
-                        keyboard = InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔄 Try Again", callback_data="shop")],
-                            [InlineKeyboardButton("💬 Support", callback_data="support")],
-                            [InlineKeyboardButton("🏠 Menu", callback_data="home")]
-                        ])
-                        
-                        await bot.edit_message_text(
-                            chat_id=order["telegram_id"],
-                            message_id=message_id,
-                            text=failed_text,
-                            reply_markup=keyboard,
-                            parse_mode='Markdown'
-                        )
-                        
-                    except Exception as e:
-                        logger.error(f"Could not edit message for failed payment: {e}")
             
             logger.info(f"Order {order_number} payment failed")
         except Exception as e:
