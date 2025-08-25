@@ -1,6 +1,6 @@
 """
 NOWPayments Integration for AnabolicPizza Bot
-Complete payment gateway implementation - FIXED VERSION
+Complete payment gateway implementation - NO USER NOTIFICATIONS VERSION
 """
 
 import aiohttp
@@ -26,7 +26,6 @@ class NOWPaymentsGateway:
         self.ipn_secret = ipn_secret
         self.sandbox = sandbox
         
-        # API endpoints
         if sandbox:
             self.base_url = "https://api-sandbox.nowpayments.io/v1"
         else:
@@ -37,22 +36,19 @@ class NOWPaymentsGateway:
             "Content-Type": "application/json"
         }
         
-        # Supported currencies
         self.supported_currencies = {
             "BTC": "btc",
             "ETH": "eth", 
             "SOL": "sol",
-            "USDT": "usdttrc20"  # TRC20 for lower fees
+            "USDT": "usdttrc20"
         }
         
-        # Database connection
         from bot_modules.config import MONGODB_URI, BOT_USERNAME
         self.mongo_client = AsyncIOMotorClient(MONGODB_URI)
         self.db = self.mongo_client.telegram_shop
         self.bot_username = BOT_USERNAME.replace('@', '')
     
     async def get_available_currencies(self) -> List[Dict]:
-        """Get list of available currencies from NOWPayments"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -70,7 +66,6 @@ class NOWPaymentsGateway:
             return []
     
     async def get_minimum_payment_amount(self, currency_from: str, currency_to: str = "usd") -> float:
-        """Get minimum payment amount for a currency pair"""
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
@@ -88,13 +83,12 @@ class NOWPaymentsGateway:
                         return float(data.get("min_amount", 0))
                     else:
                         logger.error(f"Failed to get min amount: {response.status}")
-                        return 10  # Default minimum
+                        return 10
         except Exception as e:
             logger.error(f"Error fetching minimum amount: {e}")
             return 10
     
     async def get_estimated_price(self, amount_usd: float, currency: str) -> Dict:
-        """Get estimated price in crypto for USD amount"""
         try:
             currency_code = self.supported_currencies.get(currency.upper(), currency.lower())
             
@@ -118,7 +112,6 @@ class NOWPaymentsGateway:
                         }
                     else:
                         logger.error(f"Failed to get estimate: {response.status}")
-                        # Fallback to manual calculation
                         rates = {"BTC": 65000, "ETH": 3500, "SOL": 150, "USDT": 1}
                         estimated = amount_usd / rates.get(currency.upper(), 1)
                         return {
@@ -127,7 +120,6 @@ class NOWPaymentsGateway:
                         }
         except Exception as e:
             logger.error(f"Error getting estimate: {e}")
-            # Fallback calculation
             rates = {"BTC": 65000, "ETH": 3500, "SOL": 150, "USDT": 1}
             estimated = amount_usd / rates.get(currency.upper(), 1)
             return {
@@ -136,41 +128,14 @@ class NOWPaymentsGateway:
             }
     
     async def create_payment(self, order_data: Dict) -> Dict:
-        """
-        Create a payment request in NOWPayments
-        
-        Args:
-            order_data: {
-                "order_id": str,
-                "order_number": str,
-                "amount_usd": float,
-                "currency": str (BTC/ETH/SOL/USDT),
-                "telegram_id": int,
-                "description": str (optional)
-            }
-        
-        Returns:
-            {
-                "payment_id": str,
-                "payment_status": str,
-                "pay_address": str,
-                "pay_amount": float,
-                "pay_currency": str,
-                "expiry_time": datetime,
-                "payment_url": str (optional)
-            }
-        """
         try:
-            # Convert currency code
             currency_code = self.supported_currencies.get(
                 order_data["currency"].upper(), 
                 order_data["currency"].lower()
             )
             
-            # Simple description - no branding
             description = f"Order {order_data['order_number']}"
             
-            # Prepare payment data
             payment_data = {
                 "price_amount": order_data["amount_usd"],
                 "price_currency": "usd",
@@ -178,7 +143,7 @@ class NOWPaymentsGateway:
                 "order_id": order_data["order_number"],
                 "order_description": description,
                 "ipn_callback_url": "https://stnwgn.com/api/payments/webhook",
-                "is_fixed_rate": True,  # Fixed rate to avoid price fluctuations
+                "is_fixed_rate": True,
                 "is_fee_paid_by_user": False
             }
             
@@ -191,7 +156,6 @@ class NOWPaymentsGateway:
                     if response.status in [200, 201]:
                         data = await response.json()
                         
-                        # Save payment info to database
                         payment_record = {
                             "order_id": order_data["order_id"],
                             "order_number": order_data["order_number"],
@@ -217,7 +181,7 @@ class NOWPaymentsGateway:
                             "pay_amount": float(data["pay_amount"]),
                             "pay_currency": data["pay_currency"].upper(),
                             "expiry_time": data.get("expiry_estimate_date"),
-                            "payment_url": data.get("invoice_url")  # For invoice-based payments
+                            "payment_url": data.get("invoice_url")
                         }
                     else:
                         error_text = await response.text()
@@ -235,7 +199,6 @@ class NOWPaymentsGateway:
             }
     
     async def check_payment_status(self, payment_id: str) -> Dict:
-        """Check the status of a payment"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -245,7 +208,6 @@ class NOWPaymentsGateway:
                     if response.status == 200:
                         data = await response.json()
                         
-                        # Update local record
                         await self.db.payment_records.update_one(
                             {"payment_id": payment_id},
                             {
@@ -273,13 +235,11 @@ class NOWPaymentsGateway:
             return None
     
     async def verify_ipn_signature(self, signature: str, payload: bytes) -> bool:
-        """Verify IPN webhook signature from NOWPayments"""
         if not self.ipn_secret:
             logger.warning("IPN secret not configured - skipping signature verification")
             return True
         
         try:
-            # NOWPayments uses HMAC-SHA512 for IPN signatures
             expected_signature = hmac.new(
                 self.ipn_secret.encode(),
                 payload,
@@ -292,31 +252,13 @@ class NOWPaymentsGateway:
             return False
     
     async def process_ipn_callback(self, payload: Dict, signature: str = None) -> bool:
-        """
-        Process IPN callback from NOWPayments
-        
-        Webhook payload includes:
-        - payment_id
-        - payment_status
-        - pay_address
-        - price_amount
-        - price_currency
-        - pay_amount
-        - actually_paid
-        - pay_currency
-        - order_id
-        - order_description
-        - outcome_amount
-        - outcome_currency
-        """
         try:
             payment_id = payload.get("payment_id")
             payment_status = payload.get("payment_status")
-            order_number = payload.get("order_id")  # This is order_number from NOWPayments
+            order_number = payload.get("order_id")
             
             logger.info(f"Processing IPN for payment {payment_id}: status={payment_status}")
             
-            # Update payment record
             await self.db.payment_records.update_one(
                 {"payment_id": payment_id},
                 {
@@ -331,21 +273,16 @@ class NOWPaymentsGateway:
                 }
             )
             
-            # Handle different payment statuses
             if payment_status == "finished":
-                # Payment confirmed - update order
                 await self.confirm_order_payment(order_number, payment_id, payload)
                 
             elif payment_status == "partially_paid":
-                # Partial payment received
                 await self.handle_partial_payment(order_number, payment_id, payload)
                 
             elif payment_status == "expired":
-                # Payment expired
                 await self.handle_expired_payment(order_number, payment_id)
                 
             elif payment_status == "failed":
-                # Payment failed
                 await self.handle_failed_payment(order_number, payment_id)
             
             return True
@@ -357,15 +294,12 @@ class NOWPaymentsGateway:
             return False
     
     async def confirm_order_payment(self, order_number: str, payment_id: str, payment_data: Dict):
-        """Confirm order payment in database"""
         try:
-            # Find order by order_number
             order = await self.db.orders.find_one({"order_number": order_number})
             if not order:
                 logger.error(f"Order not found: {order_number}")
                 return
             
-            # Update order status
             await self.db.orders.update_one(
                 {"order_number": order_number},
                 {
@@ -381,7 +315,6 @@ class NOWPaymentsGateway:
                 }
             )
             
-            # Update product sold counts
             if order.get("items"):
                 for item in order["items"]:
                     await self.db.products.update_one(
@@ -389,7 +322,6 @@ class NOWPaymentsGateway:
                         {"$inc": {"sold_count": item.get("quantity", 1)}}
                     )
             
-            # Update user stats
             await self.db.users.update_one(
                 {"telegram_id": order["telegram_id"]},
                 {
@@ -400,18 +332,14 @@ class NOWPaymentsGateway:
                 }
             )
             
-            # Send notification to user
-            await self.notify_user_payment_confirmed(order["telegram_id"], order_number)
-            
-            # Send public notification
             try:
                 from bot_modules.public_notifications import public_notifier
-                order["status"] = "paid"  # Ensure status is set for notification
+                order["status"] = "paid"
                 asyncio.create_task(public_notifier.send_notification(order))
             except Exception as e:
                 logger.error(f"Public notification error: {e}")
             
-            logger.info(f"✅ Order {order_number} payment confirmed via IPN")
+            logger.info(f"✅ Order {order_number} payment confirmed via IPN - DB updated")
             
         except Exception as e:
             logger.error(f"Error confirming order payment: {e}")
@@ -419,7 +347,6 @@ class NOWPaymentsGateway:
             traceback.print_exc()
     
     async def handle_partial_payment(self, order_number: str, payment_id: str, payment_data: Dict):
-        """Handle partial payment"""
         try:
             actually_paid = float(payment_data.get("actually_paid", 0))
             expected = float(payment_data.get("pay_amount", 0))
@@ -435,21 +362,12 @@ class NOWPaymentsGateway:
                 }
             )
             
-            # Notify user about partial payment
-            order = await self.db.orders.find_one({"order_number": order_number})
-            if order:
-                await self.notify_user_partial_payment(
-                    order["telegram_id"], 
-                    order_number, 
-                    actually_paid, 
-                    expected
-                )
+            logger.info(f"Order {order_number} partial payment: {actually_paid}/{expected}")
                 
         except Exception as e:
             logger.error(f"Error handling partial payment: {e}")
     
     async def handle_expired_payment(self, order_number: str, payment_id: str):
-        """Handle expired payment"""
         try:
             await self.db.orders.update_one(
                 {"order_number": order_number},
@@ -465,7 +383,6 @@ class NOWPaymentsGateway:
             logger.error(f"Error handling expired payment: {e}")
     
     async def handle_failed_payment(self, order_number: str, payment_id: str):
-        """Handle failed payment"""
         try:
             await self.db.orders.update_one(
                 {"order_number": order_number},
@@ -479,84 +396,11 @@ class NOWPaymentsGateway:
             logger.info(f"Order {order_number} payment failed")
         except Exception as e:
             logger.error(f"Error handling failed payment: {e}")
-    
-    async def notify_user_payment_confirmed(self, telegram_id: int, order_number: str):
-        """Send payment confirmation to user via Telegram with navigation buttons"""
-        try:
-            from bot_modules.public_notifications import public_notifier
-            from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-            
-            bot = public_notifier.bot
-            
-            message = f"""
-✅ *PAYMENT CONFIRMED!*
-
-Order: `{order_number}`
-
-Your payment has been confirmed! 🎉
-
-*What happens next:*
-• Order is being processed
-• Shipping within 24 hours
-• You'll receive tracking information
-
-Thank you for your order! 💪
-
-_Time to get massive! Your gains are on the way!_ 🍕💉
-"""
-            
-            # Navigation buttons that work in bot
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📦 My Orders", url=f"https://t.me/{self.bot_username}?start=orders")],
-                [InlineKeyboardButton("🏠 Main Menu", url=f"https://t.me/{self.bot_username}?start=menu")],
-                [InlineKeyboardButton("🍕 Order More", url=f"https://t.me/{self.bot_username}?start=shop")]
-            ])
-            
-            await bot.send_message(
-                chat_id=telegram_id,
-                text=message,
-                parse_mode='Markdown',
-                reply_markup=keyboard
-            )
-            
-        except Exception as e:
-            logger.error(f"Error notifying user: {e}")
-    
-    async def notify_user_partial_payment(self, telegram_id: int, order_number: str, paid: float, expected: float):
-        """Notify user about partial payment"""
-        try:
-            from bot_modules.public_notifications import public_notifier
-            bot = public_notifier.bot
-            
-            remaining = expected - paid
-            
-            message = f"""
-⚠️ *PARTIAL PAYMENT RECEIVED*
-
-Order: `{order_number}`
-
-Received: {paid:.8f}
-Expected: {expected:.8f}
-Remaining: {remaining:.8f}
-
-Please send the remaining amount to complete your order.
-The payment address remains the same.
-"""
-            await bot.send_message(
-                chat_id=telegram_id,
-                text=message,
-                parse_mode='Markdown'
-            )
-            
-        except Exception as e:
-            logger.error(f"Error notifying user about partial payment: {e}")
 
 
-# Global payment gateway instance
 payment_gateway = None
 
 def initialize_payment_gateway(api_key: str, ipn_secret: str, sandbox: bool = False):
-    """Initialize the payment gateway with credentials"""
     global payment_gateway
     payment_gateway = NOWPaymentsGateway(api_key, ipn_secret, sandbox)
     logger.info(f"NOWPayments gateway initialized (sandbox={sandbox})")
