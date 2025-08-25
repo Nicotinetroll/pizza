@@ -1,407 +1,309 @@
-"""
-NOWPayments Integration for AnabolicPizza Bot
-Complete payment gateway implementation - NO USER NOTIFICATIONS VERSION
-"""
-
-import aiohttp
-import hmac
-import hashlib
-import json
 import logging
-from typing import Dict, Optional, List
-from datetime import datetime
-from decimal import Decimal
 import asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
-from bson import ObjectId
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram import Update
 
+from bot_modules.config import BOT_TOKEN
+from bot_modules.message_loader import message_loader
+from bot_modules.handlers import (
+    handle_message, handle_group_command, handle_dynamic_command,
+    start_command, shop_command, cart_command, orders_command, help_command,
+    request_command, closerequest_command, requests_command, clear_command
+)
+from bot_modules.callbacks import handle_callback
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-
-class NOWPaymentsGateway:
-    """NOWPayments API integration handler"""
-    
-    def __init__(self, api_key: str, ipn_secret: str, sandbox: bool = False):
-        self.api_key = api_key
-        self.ipn_secret = ipn_secret
-        self.sandbox = sandbox
+async def register_dynamic_commands(application):
+    try:
+        commands = await message_loader.load_commands()
         
-        if sandbox:
-            self.base_url = "https://api-sandbox.nowpayments.io/v1"
+        logger.info(f"Loading {len(commands)} commands from database...")
+        
+        registered_commands = set()
+        registered_group_commands = set()
+        
+        core_commands = {
+            '/start': start_command,
+            '/shop': shop_command,
+            '/cart': cart_command,
+            '/orders': orders_command,
+            '/help': help_command,
+            '/clear': clear_command,
+            '/request': request_command,
+            '/closerequest': closerequest_command,
+            '/requests': requests_command
+        }
+        
+        for command, data in commands.items():
+            command_name = command.replace('/', '')
+            
+            if command_name in registered_commands:
+                continue
+            
+            if not data.get('enabled', True):
+                logger.info(f"Skipping disabled command: /{command_name}")
+                continue
+            
+            if command in core_commands:
+                handler = core_commands[command]
+                logger.info(f"Using specific handler for core command: {command}")
+            else:
+                handler = handle_dynamic_command
+            
+            private_only = data.get('private_only', True)
+            group_redirect = data.get('group_redirect', True)
+            
+            logger.info(f"Registering /{command_name}: private_only={private_only}, group_redirect={group_redirect}")
+            
+            if private_only:
+                application.add_handler(CommandHandler(
+                    command_name, 
+                    handler, 
+                    filters=filters.ChatType.PRIVATE
+                ))
+                registered_commands.add(command_name)
+                logger.info(f"  ✓ Registered /{command_name} for PRIVATE chats")
+                
+                if group_redirect:
+                    application.add_handler(CommandHandler(
+                        command_name,
+                        handle_group_command,
+                        filters=filters.ChatType.GROUPS
+                    ))
+                    registered_group_commands.add(command_name)
+                    logger.info(f"  ✓ Added GROUP redirect for /{command_name}")
+            else:
+                application.add_handler(CommandHandler(
+                    command_name,
+                    handler
+                ))
+                registered_commands.add(command_name)
+                logger.info(f"  ✓ Registered /{command_name} for ALL chat types")
+            
+            for alias in data.get('aliases', []):
+                alias_name = alias.replace('/', '')
+                if alias_name not in registered_commands:
+                    alias_handler = core_commands.get(alias, handle_dynamic_command)
+                    
+                    if private_only:
+                        application.add_handler(CommandHandler(
+                            alias_name, 
+                            alias_handler, 
+                            filters=filters.ChatType.PRIVATE
+                        ))
+                        if group_redirect:
+                            application.add_handler(CommandHandler(
+                                alias_name,
+                                handle_group_command,
+                                filters=filters.ChatType.GROUPS
+                            ))
+                            registered_group_commands.add(alias_name)
+                    else:
+                        application.add_handler(CommandHandler(
+                            alias_name, 
+                            alias_handler
+                        ))
+                    registered_commands.add(alias_name)
+                    logger.info(f"    └─ Alias /{alias_name}")
+        
+        clear_handler = CommandHandler(
+            "clear",
+            clear_command,
+            filters=filters.ChatType.PRIVATE
+        )
+        application.add_handler(clear_handler)
+        
+        request_handler = CommandHandler(
+            "request",
+            request_command
+        )
+        application.add_handler(request_handler)
+        
+        closerequest_handler = CommandHandler(
+            "closerequest",
+            closerequest_command
+        )
+        application.add_handler(closerequest_handler)
+        
+        requests_handler = CommandHandler(
+            "requests",
+            requests_command,
+            filters=filters.ChatType.PRIVATE
+        )
+        application.add_handler(requests_handler)
+        
+        logger.info(f"✅ Registration complete: {len(registered_commands) + 4} commands")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error registering dynamic commands: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def register_fallback_commands(application):
+    logger.warning("⚠️ Using fallback commands - database unavailable")
+    
+    application.add_handler(CommandHandler(
+        "start", 
+        start_command,
+        filters=filters.ChatType.PRIVATE
+    ))
+    
+    application.add_handler(CommandHandler(
+        "help", 
+        help_command,
+        filters=filters.ChatType.PRIVATE
+    ))
+    
+    application.add_handler(CommandHandler(
+        "clear",
+        clear_command,
+        filters=filters.ChatType.PRIVATE
+    ))
+    
+    application.add_handler(CommandHandler(
+        "request",
+        request_command
+    ))
+    
+    application.add_handler(CommandHandler(
+        "closerequest",
+        closerequest_command
+    ))
+    
+    application.add_handler(CommandHandler(
+        "requests",
+        requests_command,
+        filters=filters.ChatType.PRIVATE
+    ))
+    
+    logger.info("Registered 6 fallback commands (/start, /help, /clear, /request, /closerequest, /requests)")
+
+async def post_init(application):
+    try:
+        logger.info("🔄 Loading configuration from database...")
+        
+        await message_loader.reload_all()
+        
+        success = await register_dynamic_commands(application)
+        
+        if success:
+            logger.info("✅ Successfully loaded commands from database")
         else:
-            self.base_url = "https://api.nowpayments.io/v1"
+            logger.warning("⚠️ Failed to load commands, using minimal fallback")
+            register_fallback_commands(application)
+            
+        settings = await message_loader.load_settings()
+        if settings.get('maintenance_mode'):
+            logger.warning(f"⚠️ MAINTENANCE MODE: {settings.get('maintenance_message')}")
+            
+        logger.info("✅ Bot initialization complete!")
         
-        self.headers = {
-            "x-api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
+    except Exception as e:
+        logger.error(f"❌ Initialization error: {e}")
+        register_fallback_commands(application)
+
+async def reload_bot_config():
+    try:
+        logger.info("🔄 Reloading configuration...")
+        await message_loader.reload_all()
+        logger.info("✅ Configuration reloaded")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Reload error: {e}")
+        return False
+
+def main():
+    if not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN not found!")
+        return
+    
+    try:
+        logger.info("🚀 Creating bot application...")
+        application = Application.builder().token(BOT_TOKEN).build()
         
-        self.supported_currencies = {
-            "BTC": "btc",
-            "ETH": "eth", 
-            "SOL": "sol",
-            "USDT": "usdttrc20"
-        }
+        application.post_init = post_init
         
-        from bot_modules.config import MONGODB_URI, BOT_USERNAME
-        self.mongo_client = AsyncIOMotorClient(MONGODB_URI)
-        self.db = self.mongo_client.telegram_shop
-        self.bot_username = BOT_USERNAME.replace('@', '')
-    
-    async def get_available_currencies(self) -> List[Dict]:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/currencies",
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("currencies", [])
-                    else:
-                        logger.error(f"Failed to get currencies: {response.status}")
-                        return []
-        except Exception as e:
-            logger.error(f"Error fetching currencies: {e}")
-            return []
-    
-    async def get_minimum_payment_amount(self, currency_from: str, currency_to: str = "usd") -> float:
-        try:
-            async with aiohttp.ClientSession() as session:
-                params = {
-                    "currency_from": currency_from,
-                    "currency_to": currency_to
-                }
-                
-                async with session.get(
-                    f"{self.base_url}/min-amount",
-                    headers=self.headers,
-                    params=params
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return float(data.get("min_amount", 0))
-                    else:
-                        logger.error(f"Failed to get min amount: {response.status}")
-                        return 10
-        except Exception as e:
-            logger.error(f"Error fetching minimum amount: {e}")
-            return 10
-    
-    async def get_estimated_price(self, amount_usd: float, currency: str) -> Dict:
-        try:
-            currency_code = self.supported_currencies.get(currency.upper(), currency.lower())
-            
-            async with aiohttp.ClientSession() as session:
-                params = {
-                    "amount": amount_usd,
-                    "currency_from": "usd",
-                    "currency_to": currency_code
-                }
-                
-                async with session.get(
-                    f"{self.base_url}/estimate",
-                    headers=self.headers,
-                    params=params
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return {
-                            "estimated_amount": float(data.get("estimated_amount", 0)),
-                            "currency": currency_code.upper()
-                        }
-                    else:
-                        logger.error(f"Failed to get estimate: {response.status}")
-                        rates = {"BTC": 65000, "ETH": 3500, "SOL": 150, "USDT": 1}
-                        estimated = amount_usd / rates.get(currency.upper(), 1)
-                        return {
-                            "estimated_amount": estimated,
-                            "currency": currency.upper()
-                        }
-        except Exception as e:
-            logger.error(f"Error getting estimate: {e}")
-            rates = {"BTC": 65000, "ETH": 3500, "SOL": 150, "USDT": 1}
-            estimated = amount_usd / rates.get(currency.upper(), 1)
-            return {
-                "estimated_amount": estimated,
-                "currency": currency.upper()
-            }
-    
-    async def create_payment(self, order_data: Dict) -> Dict:
-        try:
-            currency_code = self.supported_currencies.get(
-                order_data["currency"].upper(), 
-                order_data["currency"].lower()
-            )
-            
-            description = f"Order {order_data['order_number']}"
-            
-            payment_data = {
-                "price_amount": order_data["amount_usd"],
-                "price_currency": "usd",
-                "pay_currency": currency_code,
-                "order_id": order_data["order_number"],
-                "order_description": description,
-                "ipn_callback_url": "https://stnwgn.com/api/payments/webhook",
-                "is_fixed_rate": True,
-                "is_fee_paid_by_user": False
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/payment",
-                    headers=self.headers,
-                    json=payment_data
-                ) as response:
-                    if response.status in [200, 201]:
-                        data = await response.json()
-                        
-                        payment_record = {
-                            "order_id": order_data["order_id"],
-                            "order_number": order_data["order_number"],
-                            "telegram_id": order_data["telegram_id"],
-                            "payment_id": data["payment_id"],
-                            "pay_address": data["pay_address"],
-                            "pay_amount": float(data["pay_amount"]),
-                            "pay_currency": data["pay_currency"].upper(),
-                            "price_amount": float(data["price_amount"]),
-                            "price_currency": data["price_currency"].upper(),
-                            "payment_status": data["payment_status"],
-                            "created_at": datetime.utcnow(),
-                            "expiry_estimate": data.get("expiry_estimate_date")
-                        }
-                        
-                        await self.db.payment_records.insert_one(payment_record)
-                        
-                        return {
-                            "success": True,
-                            "payment_id": data["payment_id"],
-                            "payment_status": data["payment_status"],
-                            "pay_address": data["pay_address"],
-                            "pay_amount": float(data["pay_amount"]),
-                            "pay_currency": data["pay_currency"].upper(),
-                            "expiry_time": data.get("expiry_estimate_date"),
-                            "payment_url": data.get("invoice_url")
-                        }
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Payment creation failed: {response.status} - {error_text}")
-                        return {
-                            "success": False,
-                            "error": f"Payment creation failed: {error_text}"
-                        }
-                        
-        except Exception as e:
-            logger.error(f"Error creating payment: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def check_payment_status(self, payment_id: str) -> Dict:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/payment/{payment_id}",
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        await self.db.payment_records.update_one(
-                            {"payment_id": payment_id},
-                            {
-                                "$set": {
-                                    "payment_status": data["payment_status"],
-                                    "actually_paid": float(data.get("actually_paid", 0)),
-                                    "updated_at": datetime.utcnow()
-                                }
-                            }
-                        )
-                        
-                        return {
-                            "payment_id": payment_id,
-                            "payment_status": data["payment_status"],
-                            "actually_paid": float(data.get("actually_paid", 0)),
-                            "pay_amount": float(data.get("pay_amount", 0)),
-                            "outcome_amount": float(data.get("outcome_amount", 0)),
-                            "outcome_currency": data.get("outcome_currency", "USD")
-                        }
-                    else:
-                        logger.error(f"Failed to check payment status: {response.status}")
-                        return None
-        except Exception as e:
-            logger.error(f"Error checking payment status: {e}")
-            return None
-    
-    async def verify_ipn_signature(self, signature: str, payload: bytes) -> bool:
-        if not self.ipn_secret:
-            logger.warning("IPN secret not configured - skipping signature verification")
-            return True
+        application.add_handler(CallbackQueryHandler(handle_callback))
         
-        try:
-            expected_signature = hmac.new(
-                self.ipn_secret.encode(),
-                payload,
-                hashlib.sha512
-            ).hexdigest()
+        application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+            handle_message
+        ))
+        
+        job_queue = application.job_queue
+        if job_queue:
+            async def reload_job(context):
+                await reload_bot_config()
             
-            return hmac.compare_digest(expected_signature, signature)
-        except Exception as e:
-            logger.error(f"Error verifying IPN signature: {e}")
-            return False
+            job_queue.run_repeating(
+                reload_job,
+                interval=300,
+                first=300,
+                name='reload_config'
+            )
+            logger.info("📅 Auto-reload scheduled every 5 minutes")
+        
+        logger.info("="*50)
+        logger.info("🍕💪 AnabolicPizza Bot - WITH CLEAR & REQUESTS")
+        logger.info("🔧 Dynamic Loading + Clear Chat + Product Requests")
+        logger.info("✅ Buttons will work after restart!")
+        logger.info("🧹 /clear command enabled")
+        logger.info("📝 /request, /closerequest, /requests enabled")
+        logger.info("🔄 Auto-reload: 5 minutes")
+        logger.info("="*50)
+        
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
-    async def process_ipn_callback(self, payload: Dict, signature: str = None) -> bool:
-        try:
-            payment_id = payload.get("payment_id")
-            payment_status = payload.get("payment_status")
-            order_number = payload.get("order_id")
-            
-            logger.info(f"Processing IPN for payment {payment_id}: status={payment_status}")
-            
-            await self.db.payment_records.update_one(
-                {"payment_id": payment_id},
-                {
-                    "$set": {
-                        "payment_status": payment_status,
-                        "actually_paid": float(payload.get("actually_paid", 0)),
-                        "outcome_amount": float(payload.get("outcome_amount", 0)),
-                        "outcome_currency": payload.get("outcome_currency"),
-                        "updated_at": datetime.utcnow(),
-                        "ipn_data": payload
-                    }
-                }
-            )
-            
-            if payment_status == "finished":
-                await self.confirm_order_payment(order_number, payment_id, payload)
-                
-            elif payment_status == "partially_paid":
-                await self.handle_partial_payment(order_number, payment_id, payload)
-                
-            elif payment_status == "expired":
-                await self.handle_expired_payment(order_number, payment_id)
-                
-            elif payment_status == "failed":
-                await self.handle_failed_payment(order_number, payment_id)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error processing IPN callback: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    async def confirm_order_payment(self, order_number: str, payment_id: str, payment_data: Dict):
-        try:
-            order = await self.db.orders.find_one({"order_number": order_number})
-            if not order:
-                logger.error(f"Order not found: {order_number}")
-                return
-            
-            await self.db.orders.update_one(
-                {"order_number": order_number},
-                {
-                    "$set": {
-                        "status": "paid",
-                        "paid_at": datetime.utcnow(),
-                        "payment.status": "confirmed",
-                        "payment.transaction_id": payment_id,
-                        "payment.actually_paid": float(payment_data.get("actually_paid", 0)),
-                        "payment.outcome_amount": float(payment_data.get("outcome_amount", 0)),
-                        "payment.outcome_currency": payment_data.get("outcome_currency")
-                    }
-                }
-            )
-            
-            if order.get("items"):
-                for item in order["items"]:
-                    await self.db.products.update_one(
-                        {"name": item["product_name"]},
-                        {"$inc": {"sold_count": item.get("quantity", 1)}}
-                    )
-            
-            await self.db.users.update_one(
-                {"telegram_id": order["telegram_id"]},
-                {
-                    "$inc": {
-                        "total_orders": 1,
-                        "total_spent_usdt": float(order.get("total_usdt", 0))
-                    }
-                }
-            )
-            
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from bot_modules.config import MONGODB_URI
+        
+        async def test_db():
             try:
-                from bot_modules.public_notifications import public_notifier
-                order["status"] = "paid"
-                asyncio.create_task(public_notifier.send_notification(order))
-            except Exception as e:
-                logger.error(f"Public notification error: {e}")
-            
-            logger.info(f"✅ Order {order_number} payment confirmed via IPN - DB updated")
-            
-        except Exception as e:
-            logger.error(f"Error confirming order payment: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    async def handle_partial_payment(self, order_number: str, payment_id: str, payment_data: Dict):
-        try:
-            actually_paid = float(payment_data.get("actually_paid", 0))
-            expected = float(payment_data.get("pay_amount", 0))
-            
-            await self.db.orders.update_one(
-                {"order_number": order_number},
-                {
-                    "$set": {
-                        "payment.status": "partial",
-                        "payment.actually_paid": actually_paid,
-                        "payment.note": f"Partial payment: {actually_paid}/{expected}"
-                    }
-                }
-            )
-            
-            logger.info(f"Order {order_number} partial payment: {actually_paid}/{expected}")
+                client = AsyncIOMotorClient(MONGODB_URI)
+                await client.server_info()
+                logger.info("✅ Database connected")
                 
-        except Exception as e:
-            logger.error(f"Error handling partial payment: {e}")
-    
-    async def handle_expired_payment(self, order_number: str, payment_id: str):
-        try:
-            await self.db.orders.update_one(
-                {"order_number": order_number},
-                {
-                    "$set": {
-                        "payment.status": "expired",
-                        "status": "cancelled"
-                    }
-                }
-            )
-            logger.info(f"Order {order_number} payment expired")
-        except Exception as e:
-            logger.error(f"Error handling expired payment: {e}")
-    
-    async def handle_failed_payment(self, order_number: str, payment_id: str):
-        try:
-            await self.db.orders.update_one(
-                {"order_number": order_number},
-                {
-                    "$set": {
-                        "payment.status": "failed",
-                        "status": "cancelled"
-                    }
-                }
-            )
-            logger.info(f"Order {order_number} payment failed")
-        except Exception as e:
-            logger.error(f"Error handling failed payment: {e}")
-
-
-payment_gateway = None
-
-def initialize_payment_gateway(api_key: str, ipn_secret: str, sandbox: bool = False):
-    global payment_gateway
-    payment_gateway = NOWPaymentsGateway(api_key, ipn_secret, sandbox)
-    logger.info(f"NOWPayments gateway initialized (sandbox={sandbox})")
-    return payment_gateway
+                db = client.telegram_shop
+                commands = await db.bot_commands.find({}).to_list(100)
+                logger.info(f"📋 Found {len(commands)} commands in database")
+                
+                return True
+            except Exception as e:
+                logger.error(f"❌ Database error: {e}")
+                return False
+        
+        db_ok = loop.run_until_complete(test_db())
+        
+        if not db_ok:
+            logger.error("Cannot start without database!")
+            exit(1)
+            
+        main()
+        
+    except KeyboardInterrupt:
+        logger.info("🛑 Stopped by user")
+    except Exception as e:
+        logger.error(f"❌ Error: {e}")
+    finally:
+        loop.close()
+        logger.info("👋 Shutdown complete")
