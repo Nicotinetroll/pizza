@@ -12,7 +12,7 @@ import sys
 
 from .handlers import (
     start_command, show_categories, show_category_products, show_product_detail,
-    show_cart, help_command, user_states, user_context, user_quantities
+    show_cart, help_command, user_states, user_context
 )
 from .cart_manager import cart_manager
 from .database import (
@@ -196,6 +196,32 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def handle_quantity_change(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    """Handle simplified quantity adjustment"""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    
+    if "minus" in data:
+        product_id = data.replace("qty_minus_", "")
+        adjustment = -1
+    elif "plus" in data:
+        product_id = data.replace("qty_plus_", "")
+        adjustment = 1
+    else:
+        return
+    
+    # Použij cart_manager namiesto user_quantities
+    new_qty = cart_manager.adjust_quantity(user_id, product_id, adjustment)
+    
+    # Show feedback
+    if adjustment < 0 and new_qty == 1:
+        await query.answer("Minimum quantity is 1!", show_alert=False)
+    elif adjustment > 0 and new_qty >= 20:
+        await query.answer(f"Quantity set to {new_qty}. That's a lot! 💪", show_alert=True)
+    else:
+        await query.answer(f"Quantity: {new_qty}", show_alert=False)
+    
+    # Refresh product detail
+    await show_product_detail(update, context, product_id)
     """Handle simplified quantity adjustment"""
     query = update.callback_query
     user_id = update.effective_user.id
