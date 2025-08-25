@@ -101,3 +101,22 @@ async def test_nowpayments_connection():
         }
     else:
         raise HTTPException(status_code=503, detail="Cannot connect to NOWPayments")
+
+@router_payments.post("/api/payments/test-webhook")
+async def test_webhook(request: Request):
+    """Test endpoint to verify webhooks can reach the server"""
+    body = await request.body()
+    headers = dict(request.headers)
+    
+    logger.info(f"TEST WEBHOOK RECEIVED")
+    logger.info(f"Headers: {headers}")
+    logger.info(f"Body: {body}")
+    
+    # Save to database for inspection
+    await db.webhook_tests.insert_one({
+        "timestamp": datetime.utcnow(),
+        "headers": headers,
+        "body": body.decode() if body else None
+    })
+    
+    return {"status": "received", "timestamp": datetime.utcnow()}

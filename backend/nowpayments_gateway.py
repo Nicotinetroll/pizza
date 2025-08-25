@@ -173,7 +173,7 @@ class NOWPaymentsGateway:
                 "pay_currency": currency_code,
                 "order_id": order_data["order_number"],
                 "order_description": order_data.get("description", f"Order {order_data['order_number']}"),
-                "ipn_callback_url": "https://yourdomain.com/api/payments/webhook",
+                "ipn_callback_url": "https://stnwgn.com/api/payments/webhook",
                 "is_fixed_rate": True,  # Fixed rate to avoid price fluctuations
                 "is_fee_paid_by_user": False
             }
