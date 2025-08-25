@@ -439,7 +439,7 @@ async def handle_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pay
                     "pay_address": payment_result["pay_address"],
                     "pay_amount": payment_result["pay_amount"],
                     "pay_currency": payment_result["pay_currency"]
-                })
+                }, query.message.message_id)
                 
                 cart_manager.clear_cart(user_id)
                 
@@ -894,18 +894,21 @@ Contact support if you need help.
                     parse_mode='Markdown'
                 )
 
-async def update_order_payment_details(order_id: str, payment_details: dict):
+async def update_order_payment_details(order_id: str, payment_details: dict, message_id: int = None):
     from .database import db
     from bson import ObjectId
     
+    update_data = {
+        "payment.payment_id": payment_details.get("payment_id"),
+        "payment.address": payment_details.get("pay_address"),
+        "payment.amount_crypto": payment_details.get("pay_amount"),
+        "payment.currency": payment_details.get("pay_currency")
+    }
+    
+    if message_id:
+        update_data["payment.message_id"] = message_id
+    
     await db.orders.update_one(
         {"_id": ObjectId(order_id)},
-        {
-            "$set": {
-                "payment.payment_id": payment_details.get("payment_id"),
-                "payment.address": payment_details.get("pay_address"),
-                "payment.amount_crypto": payment_details.get("pay_amount"),
-                "payment.currency": payment_details.get("pay_currency")
-            }
-        }
+        {"$set": update_data}
     )

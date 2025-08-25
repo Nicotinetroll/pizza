@@ -1,6 +1,6 @@
 """
 NOWPayments Integration for AnabolicPizza Bot
-Complete payment gateway implementation - NO USER NOTIFICATIONS VERSION
+Complete payment gateway with message editing support
 """
 
 import aiohttp
@@ -332,6 +332,52 @@ class NOWPaymentsGateway:
                 }
             )
             
+            message_id = order.get("payment", {}).get("message_id")
+            if message_id:
+                try:
+                    from bot_modules.public_notifications import public_notifier
+                    from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+                    
+                    bot = public_notifier.bot
+                    
+                    success_text = f"""
+✅ *PAYMENT CONFIRMED!*
+
+Order: `{order_number}`
+
+Your payment has been successfully received! 🎉
+
+*What happens next:*
+• Order is being processed
+• Shipping within 24 hours
+• You'll receive tracking info
+
+Thank you for your order! 💪
+
+_Time to get massive! Your gains are on the way!_ 🍕💉
+"""
+                    
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📦 My Orders", callback_data="orders")],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")],
+                        [InlineKeyboardButton("🍕 Order More", callback_data="shop")]
+                    ])
+                    
+                    await bot.edit_message_text(
+                        chat_id=order["telegram_id"],
+                        message_id=message_id,
+                        text=success_text,
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
+                    )
+                    
+                    logger.info(f"✅ Edited message {message_id} for confirmed payment: {order_number}")
+                    
+                except Exception as e:
+                    logger.error(f"Could not edit message: {e}")
+            else:
+                logger.warning(f"No message_id found for order {order_number}")
+            
             try:
                 from bot_modules.public_notifications import public_notifier
                 order["status"] = "paid"
@@ -339,7 +385,7 @@ class NOWPaymentsGateway:
             except Exception as e:
                 logger.error(f"Public notification error: {e}")
             
-            logger.info(f"✅ Order {order_number} payment confirmed via IPN - DB updated")
+            logger.info(f"✅ Order {order_number} payment confirmed via IPN")
             
         except Exception as e:
             logger.error(f"Error confirming order payment: {e}")
@@ -362,6 +408,38 @@ class NOWPaymentsGateway:
                 }
             )
             
+            order = await self.db.orders.find_one({"order_number": order_number})
+            if order:
+                message_id = order.get("payment", {}).get("message_id")
+                if message_id:
+                    try:
+                        from bot_modules.public_notifications import public_notifier
+                        bot = public_notifier.bot
+                        
+                        remaining = expected - actually_paid
+                        
+                        partial_text = f"""
+⚠️ *PARTIAL PAYMENT RECEIVED*
+
+Order: `{order_number}`
+
+Received: `{actually_paid:.8f}`
+Expected: `{expected:.8f}`
+**Need: `{remaining:.8f}`**
+
+Please send the remaining amount to the same address.
+"""
+                        
+                        await bot.edit_message_text(
+                            chat_id=order["telegram_id"],
+                            message_id=message_id,
+                            text=partial_text,
+                            parse_mode='Markdown'
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"Could not edit message for partial payment: {e}")
+            
             logger.info(f"Order {order_number} partial payment: {actually_paid}/{expected}")
                 
         except Exception as e:
@@ -378,6 +456,43 @@ class NOWPaymentsGateway:
                     }
                 }
             )
+            
+            order = await self.db.orders.find_one({"order_number": order_number})
+            if order:
+                message_id = order.get("payment", {}).get("message_id")
+                if message_id:
+                    try:
+                        from bot_modules.public_notifications import public_notifier
+                        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+                        
+                        bot = public_notifier.bot
+                        
+                        expired_text = f"""
+❌ *PAYMENT EXPIRED*
+
+Order: `{order_number}`
+
+The payment window has expired.
+Please create a new order to continue.
+"""
+                        
+                        keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🔄 New Order", callback_data="shop")],
+                            [InlineKeyboardButton("💬 Support", callback_data="support")],
+                            [InlineKeyboardButton("🏠 Menu", callback_data="home")]
+                        ])
+                        
+                        await bot.edit_message_text(
+                            chat_id=order["telegram_id"],
+                            message_id=message_id,
+                            text=expired_text,
+                            reply_markup=keyboard,
+                            parse_mode='Markdown'
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"Could not edit message for expired payment: {e}")
+            
             logger.info(f"Order {order_number} payment expired")
         except Exception as e:
             logger.error(f"Error handling expired payment: {e}")
@@ -393,6 +508,43 @@ class NOWPaymentsGateway:
                     }
                 }
             )
+            
+            order = await self.db.orders.find_one({"order_number": order_number})
+            if order:
+                message_id = order.get("payment", {}).get("message_id")
+                if message_id:
+                    try:
+                        from bot_modules.public_notifications import public_notifier
+                        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+                        
+                        bot = public_notifier.bot
+                        
+                        failed_text = f"""
+❌ *PAYMENT FAILED*
+
+Order: `{order_number}`
+
+The payment could not be processed.
+Please try again or contact support.
+"""
+                        
+                        keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🔄 Try Again", callback_data="shop")],
+                            [InlineKeyboardButton("💬 Support", callback_data="support")],
+                            [InlineKeyboardButton("🏠 Menu", callback_data="home")]
+                        ])
+                        
+                        await bot.edit_message_text(
+                            chat_id=order["telegram_id"],
+                            message_id=message_id,
+                            text=failed_text,
+                            reply_markup=keyboard,
+                            parse_mode='Markdown'
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"Could not edit message for failed payment: {e}")
+            
             logger.info(f"Order {order_number} payment failed")
         except Exception as e:
             logger.error(f"Error handling failed payment: {e}")
