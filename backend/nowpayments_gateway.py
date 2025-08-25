@@ -1,6 +1,6 @@
 """
 NOWPayments Integration for AnabolicPizza Bot
-Complete payment gateway implementation
+Complete payment gateway implementation - FIXED VERSION
 """
 
 import aiohttp
@@ -308,7 +308,7 @@ class NOWPaymentsGateway:
         try:
             payment_id = payload.get("payment_id")
             payment_status = payload.get("payment_status")
-            order_id = payload.get("order_id")  # This is order_number
+            order_number = payload.get("order_id")  # This is order_number from NOWPayments
             
             logger.info(f"Processing IPN for payment {payment_id}: status={payment_status}")
             
@@ -330,89 +330,29 @@ class NOWPaymentsGateway:
             # Handle different payment statuses
             if payment_status == "finished":
                 # Payment confirmed - update order
-                await self._confirm_order_payment(order_id, payment_id, payload)
+                await self.confirm_order_payment(order_number, payment_id, payload)
                 
             elif payment_status == "partially_paid":
                 # Partial payment received
-                await self._handle_partial_payment(order_id, payment_id, payload)
+                await self.handle_partial_payment(order_number, payment_id, payload)
                 
             elif payment_status == "expired":
                 # Payment expired
-                await self._handle_expired_payment(order_id, payment_id)
+                await self.handle_expired_payment(order_number, payment_id)
                 
             elif payment_status == "failed":
                 # Payment failed
-                await self._handle_failed_payment(order_id, payment_id)
+                await self.handle_failed_payment(order_number, payment_id)
             
             return True
             
         except Exception as e:
             logger.error(f"Error processing IPN callback: {e}")
-            return False
-    
-    async def confirm_order_payment(self, order_id: str, payment_data: dict) -> bool:
-        """Confirm order payment in database and notify user"""
-        try:
-            from bson import ObjectId
-            
-            # Update order status to paid
-            result = await self.db.orders.update_one(
-                {"_id": ObjectId(order_id)},
-                {
-                    "$set": {
-                        "status": "paid",
-                        "paid_at": datetime.utcnow(),
-                        "payment.status": "confirmed",
-                        "payment.transaction_id": payment_data.get("payment_id"),
-                        "payment.actually_paid": payment_data.get("actually_paid"),
-                        "payment.outcome_amount": payment_data.get("outcome_amount"),
-                        "payment.outcome_currency": payment_data.get("outcome_currency")
-                    }
-                }
-            )
-            
-            if result.modified_count > 0:
-                # Get order details
-                order = await self.db.orders.find_one({"_id": ObjectId(order_id)})
-                
-                if order:
-                    # Update product sold counts
-                    if order.get("items"):
-                        for item in order["items"]:
-                            await self.db.products.update_one(
-                                {"name": item["product_name"]},
-                                {"$inc": {"sold_count": item.get("quantity", 1)}}
-                            )
-                    
-                    # Update user stats
-                    await self.db.users.update_one(
-                        {"telegram_id": order["telegram_id"]},
-                        {
-                            "$inc": {
-                                "total_orders": 1,
-                                "total_spent_usdt": float(order.get("total_usdt", 0))
-                            }
-                        }
-                    )
-                    
-                    # Send notification to public channel (if enabled)
-                    try:
-                        from bot_modules.public_notifications import public_notifier
-                        asyncio.create_task(public_notifier.send_notification(order))
-                    except Exception as notif_err:
-                        logger.error(f"Notification error: {notif_err}")
-                    
-                    logger.info(f"✅ Order {order['order_number']} marked as PAID via IPN")
-                    return True
-            
-            logger.warning(f"Failed to update order {order_id}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error confirming payment: {e}")
             import traceback
             traceback.print_exc()
             return False
+    
+    async def confirm_order_payment(self, order_number: str, payment_id: str, payment_data: Dict):
         """Confirm order payment in database"""
         try:
             # Find order by order_number
@@ -457,18 +397,24 @@ class NOWPaymentsGateway:
             )
             
             # Send notification to user
-            await self._notify_user_payment_confirmed(order["telegram_id"], order_number)
+            await self.notify_user_payment_confirmed(order["telegram_id"], order_number)
             
             # Send public notification
-            from bot_modules.public_notifications import public_notifier
-            asyncio.create_task(public_notifier.send_notification(order))
+            try:
+                from bot_modules.public_notifications import public_notifier
+                order["status"] = "paid"  # Ensure status is set for notification
+                asyncio.create_task(public_notifier.send_notification(order))
+            except Exception as e:
+                logger.error(f"Public notification error: {e}")
             
-            logger.info(f"Order {order_number} payment confirmed")
+            logger.info(f"✅ Order {order_number} payment confirmed via IPN")
             
         except Exception as e:
             logger.error(f"Error confirming order payment: {e}")
+            import traceback
+            traceback.print_exc()
     
-    async def _handle_partial_payment(self, order_number: str, payment_id: str, payment_data: Dict):
+    async def handle_partial_payment(self, order_number: str, payment_id: str, payment_data: Dict):
         """Handle partial payment"""
         try:
             actually_paid = float(payment_data.get("actually_paid", 0))
@@ -488,7 +434,7 @@ class NOWPaymentsGateway:
             # Notify user about partial payment
             order = await self.db.orders.find_one({"order_number": order_number})
             if order:
-                await self._notify_user_partial_payment(
+                await self.notify_user_partial_payment(
                     order["telegram_id"], 
                     order_number, 
                     actually_paid, 
@@ -498,7 +444,7 @@ class NOWPaymentsGateway:
         except Exception as e:
             logger.error(f"Error handling partial payment: {e}")
     
-    async def _handle_expired_payment(self, order_number: str, payment_id: str):
+    async def handle_expired_payment(self, order_number: str, payment_id: str):
         """Handle expired payment"""
         try:
             await self.db.orders.update_one(
@@ -514,7 +460,7 @@ class NOWPaymentsGateway:
         except Exception as e:
             logger.error(f"Error handling expired payment: {e}")
     
-    async def _handle_failed_payment(self, order_number: str, payment_id: str):
+    async def handle_failed_payment(self, order_number: str, payment_id: str):
         """Handle failed payment"""
         try:
             await self.db.orders.update_one(
@@ -530,7 +476,7 @@ class NOWPaymentsGateway:
         except Exception as e:
             logger.error(f"Error handling failed payment: {e}")
     
-    async def _notify_user_payment_confirmed(self, telegram_id: int, order_number: str):
+    async def notify_user_payment_confirmed(self, telegram_id: int, order_number: str):
         """Send payment confirmation to user via Telegram"""
         try:
             from bot_modules.public_notifications import public_notifier
@@ -557,7 +503,7 @@ Thank you for your order! 💪
         except Exception as e:
             logger.error(f"Error notifying user: {e}")
     
-    async def _notify_user_partial_payment(self, telegram_id: int, order_number: str, paid: float, expected: float):
+    async def notify_user_partial_payment(self, telegram_id: int, order_number: str, paid: float, expected: float):
         """Notify user about partial payment"""
         try:
             from bot_modules.public_notifications import public_notifier
