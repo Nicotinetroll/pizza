@@ -24,6 +24,7 @@ async def get_stats():
     total_products = await db.products.count_documents({"is_active": True})
     total_categories = await db.categories.count_documents({"is_active": True})
     
+    # Calculate revenue (what customers paid)
     pipeline = [
         {"$match": {"status": {"$in": ["paid", "completed"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$total_usdt"}}}
@@ -31,19 +32,46 @@ async def get_stats():
     revenue_result = await db.orders.aggregate(pipeline).to_list(1)
     total_revenue = format_price(revenue_result[0]["total"] if revenue_result else 0)
     
+    # FIXED PROFIT CALCULATION
     total_profit = 0
     paid_orders = await db.orders.find({"status": {"$in": ["paid", "completed"]}}).to_list(None)
     
     for order in paid_orders:
+        order_profit = 0
+        
         if order.get("items"):
+            # Calculate base profit from items (before discounts)
             for item in order["items"]:
                 product = await db.products.find_one({"name": item["product_name"]})
                 if product:
                     purchase_price = product.get("purchase_price_usdt", 0)
                     selling_price = item.get("price_usdt", 0)
-                    item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
-                    total_profit += item_profit
+                    quantity = item.get("quantity", 1)
+                    
+                    # Profit per item = (selling price - purchase price) * quantity
+                    item_profit = (selling_price - purchase_price) * quantity
+                    order_profit += item_profit
+        
+        # SUBTRACT discounts from profit (discounts reduce our profit!)
+        discount_amount = order.get("discount_amount", 0)
+        order_profit = order_profit - discount_amount
+        
+        # If there's a seller commission, subtract it too
+        if order.get("referral_code"):
+            # Find the referral code to get seller commission
+            referral = await db.referral_codes.find_one({"code": order["referral_code"]})
+            if referral and referral.get("seller_id"):
+                seller = await db.sellers.find_one({"_id": ObjectId(referral["seller_id"])})
+                if seller:
+                    commission_rate = seller.get("commission_percentage", 30)
+                    # Commission is calculated from the profit AFTER discount
+                    if order_profit > 0:  # Only pay commission on positive profit
+                        seller_commission = order_profit * (commission_rate / 100)
+                        order_profit = order_profit - seller_commission
+        
+        total_profit += order_profit
     
+    # Get other stats
     active_referrals = await db.referral_codes.count_documents({"is_active": True})
     
     vip_users = await db.users.count_documents({
@@ -60,14 +88,56 @@ async def get_stats():
         "status": {"$in": ["paid", "completed"]}
     })
     
+    # Today's revenue
     today_revenue_result = await db.orders.aggregate([
         {"$match": {"created_at": {"$gte": today_start}, "status": {"$in": ["paid", "completed"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$total_usdt"}}}
     ]).to_list(1)
     today_revenue = format_price(today_revenue_result[0]["total"] if today_revenue_result else 0)
     
+    # Today's profit (with same calculation logic)
+    today_profit = 0
+    today_paid_orders = await db.orders.find({
+        "created_at": {"$gte": today_start},
+        "status": {"$in": ["paid", "completed"]}
+    }).to_list(None)
+    
+    for order in today_paid_orders:
+        order_profit = 0
+        
+        if order.get("items"):
+            for item in order["items"]:
+                product = await db.products.find_one({"name": item["product_name"]})
+                if product:
+                    purchase_price = product.get("purchase_price_usdt", 0)
+                    selling_price = item.get("price_usdt", 0)
+                    quantity = item.get("quantity", 1)
+                    item_profit = (selling_price - purchase_price) * quantity
+                    order_profit += item_profit
+        
+        # Subtract discount
+        discount_amount = order.get("discount_amount", 0)
+        order_profit = order_profit - discount_amount
+        
+        # Subtract seller commission if applicable
+        if order.get("referral_code"):
+            referral = await db.referral_codes.find_one({"code": order["referral_code"]})
+            if referral and referral.get("seller_id"):
+                seller = await db.sellers.find_one({"_id": ObjectId(referral["seller_id"])})
+                if seller and order_profit > 0:
+                    commission_rate = seller.get("commission_percentage", 30)
+                    seller_commission = order_profit * (commission_rate / 100)
+                    order_profit = order_profit - seller_commission
+        
+        today_profit += order_profit
+    
     pending_orders = await db.orders.count_documents({"status": "pending"})
     avg_order_value = format_price(total_revenue / total_orders if total_orders > 0 else 0)
+    
+    # Calculate actual profit margin
+    profit_margin = 0
+    if total_revenue > 0:
+        profit_margin = (total_profit / total_revenue) * 100
     
     top_products = await db.products.find({"sold_count": {"$gt": 0}}).sort("sold_count", -1).limit(5).to_list(5)
     for product in top_products:
@@ -85,7 +155,7 @@ async def get_stats():
             "total_orders": total_orders,
             "total_revenue_usdt": total_revenue,
             "total_profit_usdt": format_price(total_profit),
-            "profit_margin": format_price((total_profit / total_revenue * 100) if total_revenue > 0 else 0),
+            "profit_margin": format_price(profit_margin),
             "total_users": total_users,
             "total_products": total_products,
             "total_categories": total_categories,
@@ -93,6 +163,7 @@ async def get_stats():
             "vip_users": vip_users,
             "today_orders": today_orders,
             "today_revenue": today_revenue,
+            "today_profit": format_price(today_profit),
             "pending_orders": pending_orders,
             "avg_order_value": avg_order_value,
             "top_products": top_products
@@ -139,14 +210,32 @@ async def get_analytics(days: int = 30):
         }).to_list(None)
         
         for order in day_orders:
+            order_profit = 0
             if order.get("items"):
                 for item in order["items"]:
                     product = await db.products.find_one({"name": item["product_name"]})
                     if product:
                         purchase_price = product.get("purchase_price_usdt", 0)
                         selling_price = item.get("price_usdt", 0)
-                        item_profit = (selling_price - purchase_price) * item.get("quantity", 1)
-                        day_profit += item_profit
+                        quantity = item.get("quantity", 1)
+                        item_profit = (selling_price - purchase_price) * quantity
+                        order_profit += item_profit
+            
+            # Subtract discount
+            discount_amount = order.get("discount_amount", 0)
+            order_profit = order_profit - discount_amount
+            
+            # Subtract seller commission if applicable
+            if order.get("referral_code"):
+                referral = await db.referral_codes.find_one({"code": order["referral_code"]})
+                if referral and referral.get("seller_id"):
+                    seller = await db.sellers.find_one({"_id": ObjectId(referral["seller_id"])})
+                    if seller and order_profit > 0:
+                        commission_rate = seller.get("commission_percentage", 30)
+                        seller_commission = order_profit * (commission_rate / 100)
+                        order_profit = order_profit - seller_commission
+            
+            day_profit += order_profit
         
         day["profit"] = format_price(day_profit)
         day["revenue"] = format_price(day["revenue"])
