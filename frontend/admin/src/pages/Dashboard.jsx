@@ -292,41 +292,41 @@ const Dashboard = () => {
       const uniqueUsers = new Set(filteredOrders.map(order => order.user_id || order.telegram_id)).size;
       const avgOrderValue = filteredOrders.length > 0 ? totalRevenue / filteredOrders.length : 0;
       
-      // FIX: Calculate ACTUAL profit correctly considering discounts
+      // FIXED PROFIT CALCULATION
       const calculateOrderProfit = (order) => {
         // If order has profit_usdt field from backend, use it
         if (order.profit_usdt !== undefined && order.profit_usdt !== null) {
           return order.profit_usdt;
         }
         
-        // Otherwise calculate based on items
+        let totalProfit = 0;
+        
+        // Calculate profit from items
         if (order.items && order.items.length > 0) {
-          // Calculate profit from items
-          let itemsProfit = 0;
           order.items.forEach(item => {
-            // If item has profit info, use it
-            if (item.profit_per_unit) {
-              itemsProfit += item.profit_per_unit * item.quantity;
-            } else if (item.purchase_price_usdt && item.price_usdt) {
-              // Calculate profit: (selling price - purchase price) * quantity
-              const profitPerUnit = item.price_usdt - item.purchase_price_usdt;
-              itemsProfit += profitPerUnit * item.quantity;
-            } else {
-              // Fallback: assume 40% margin on the item price
-              itemsProfit += (item.subtotal_usdt || 0) * 0.4;
-            }
+            // Get the actual selling price per unit (after any item-level adjustments)
+            const sellingPricePerUnit = item.price_usdt || 0;
+            const purchasePricePerUnit = item.purchase_price_usdt || 0;
+            const quantity = item.quantity || 1;
+            
+            // Calculate base profit (selling - purchase) * quantity
+            const baseProfit = (sellingPricePerUnit - purchasePricePerUnit) * quantity;
+            totalProfit += baseProfit;
           });
-          
-          // Discounts reduce our profit directly
-          const finalProfit = itemsProfit - (order.discount_amount || 0);
-          return Math.max(0, finalProfit); // Profit can't be negative
         }
         
-        // Fallback: If no items data, estimate based on total
-        // This is less accurate but prevents showing wrong data
-        const estimatedCost = (order.total_usdt || 0) * 0.6; // Assume 60% cost
-        const estimatedProfit = (order.total_usdt || 0) - estimatedCost;
-        return Math.max(0, estimatedProfit);
+        // IMPORTANT: Subtract the discount from total profit
+        // Because discount reduces what we actually receive
+        const discountAmount = order.discount_amount || 0;
+        totalProfit = totalProfit - discountAmount;
+        
+        // If there's a seller commission, subtract it from profit
+        if (order.seller_commission) {
+          totalProfit = totalProfit - order.seller_commission;
+        }
+        
+        // Profit can be negative if discount is too high or costs are high
+        return totalProfit;
       };
       
       const totalProfit = filteredOrders.reduce((sum, order) => {
@@ -660,6 +660,9 @@ const Dashboard = () => {
     }
   };
 
+  // Add warning if profit is negative
+  const profitWarning = stats.total_profit_usdt < 0;
+
   return (
     <Box style={{ paddingBottom: isMobile ? '80px' : '0' }}>
       {/* Header - Mobile Optimized */}
@@ -733,6 +736,7 @@ const Dashboard = () => {
             <motion.div
               animate={refreshing ? { rotate: 360 } : {}}
               transition={{ duration: 1, repeat: refreshing ? Infinity : 0, ease: "linear" }}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
             >
               <ReloadIcon width={isMobile ? '16' : '18'} height={isMobile ? '16' : '18'} />
             </motion.div>
@@ -767,6 +771,23 @@ const Dashboard = () => {
         </Flex>
       )}
 
+      {/* Profit warning if negative */}
+      {profitWarning && (
+        <Card style={{
+          background: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          padding: '12px',
+          marginBottom: '16px'
+        }}>
+          <Flex align="center" gap="2">
+            <ExclamationTriangleIcon style={{ color: '#ef4444' }} />
+            <Text size="2" style={{ color: '#ef4444' }}>
+              Warning: Negative profit detected! Your discounts may be too high or costs are exceeding revenue.
+            </Text>
+          </Flex>
+        </Card>
+      )}
+
       {/* Stats Grid - Mobile Responsive */}
       <Grid 
         columns={{ 
@@ -793,7 +814,7 @@ const Dashboard = () => {
           value={stats.total_profit_usdt || 0}
           change={stats.profit_growth}
           icon={TargetIcon}
-          color="#10b981"
+          color={stats.total_profit_usdt >= 0 ? "#10b981" : "#ef4444"}
           prefix="$"
           decimals={isMobile ? 0 : 2}
         />
@@ -1004,56 +1025,62 @@ const Dashboard = () => {
           </Heading>
           
           <Flex direction="column" gap={isMobile ? '2' : '3'}>
-            {(stats.top_products || []).slice(0, 5).map((product, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: idx * 0.1 }}
-              >
-                <Flex align="center" justify="between">
-                  <Flex align="center" gap={isMobile ? '2' : '3'}>
-                    <Box style={{
-                      width: isMobile ? '24px' : '32px',
-                      height: isMobile ? '24px' : '32px',
-                      borderRadius: '8px',
-                      background: idx === 0 ? '#ffd700' : idx === 1 ? '#c0c0c0' : idx === 2 ? '#cd7f32' : '#8b5cf6',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 'bold',
-                      fontSize: isMobile ? '12px' : '14px'
-                    }}>
-                      {idx + 1}
-                    </Box>
-                    <Box>
-                      <Text size={isMobile ? '1' : '2'} weight="medium" style={{ display: 'block', marginBottom: '2px' }}>
-                        {product.name}
-                      </Text>
-                      <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                        {product.sold_count} sold
-                      </Text>
-                    </Box>
+            {(stats.top_products || []).slice(0, 5).map((product, idx) => {
+              // Calculate actual profit for this product
+              const profitPerUnit = (product.price_usdt - (product.purchase_price_usdt || 0));
+              const totalProductProfit = profitPerUnit * product.sold_count;
+              
+              return (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.1 }}
+                >
+                  <Flex align="center" justify="between">
+                    <Flex align="center" gap={isMobile ? '2' : '3'}>
+                      <Box style={{
+                        width: isMobile ? '24px' : '32px',
+                        height: isMobile ? '24px' : '32px',
+                        borderRadius: '8px',
+                        background: idx === 0 ? '#ffd700' : idx === 1 ? '#c0c0c0' : idx === 2 ? '#cd7f32' : '#8b5cf6',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 'bold',
+                        fontSize: isMobile ? '12px' : '14px'
+                      }}>
+                        {idx + 1}
+                      </Box>
+                      <Box>
+                        <Text size={isMobile ? '1' : '2'} weight="medium" style={{ display: 'block', marginBottom: '2px' }}>
+                          {product.name}
+                        </Text>
+                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                          {product.sold_count} sold
+                        </Text>
+                      </Box>
+                    </Flex>
+                    
+                    <Text size={isMobile ? '2' : '3'} weight="bold" style={{ color: '#10b981' }}>
+                      ${formatPrice(totalProductProfit)}
+                    </Text>
                   </Flex>
                   
-                  <Text size={isMobile ? '2' : '3'} weight="bold" style={{ color: '#10b981' }}>
-                    ${formatPrice((product.price_usdt - (product.purchase_price_usdt || 0)) * product.sold_count)}
-                  </Text>
-                </Flex>
-                
-                {!isMobile && (
-                  <Box mt="2">
-                    <Progress 
-                      value={(product.sold_count / Math.max(...(stats.top_products || [{sold_count: 1}]).map(p => p.sold_count))) * 100}
-                      size="1"
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.05)'
-                      }}
-                    />
-                  </Box>
-                )}
-              </motion.div>
-            ))}
+                  {!isMobile && (
+                    <Box mt="2">
+                      <Progress 
+                        value={(product.sold_count / Math.max(...(stats.top_products || [{sold_count: 1}]).map(p => p.sold_count))) * 100}
+                        size="1"
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.05)'
+                        }}
+                      />
+                    </Box>
+                  )}
+                </motion.div>
+              );
+            })}
             {(!stats.top_products || stats.top_products.length === 0) && (
               <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)', textAlign: 'center', padding: '20px' }}>
                 No products sold yet
