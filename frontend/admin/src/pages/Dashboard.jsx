@@ -16,7 +16,6 @@ import {
 } from 'recharts';
 import { statsAPI, ordersAPI, adminAPI } from '../services/api';
 
-// Animated counter component
 const AnimatedNumber = ({ value, prefix = '', suffix = '', decimals = 0 }) => {
   const [displayValue, setDisplayValue] = useState(0);
 
@@ -49,7 +48,6 @@ const AnimatedNumber = ({ value, prefix = '', suffix = '', decimals = 0 }) => {
   );
 };
 
-// Mobile-optimized Stat Card
 const MobileStatCard = ({ title, value, change, icon: Icon, color, prefix = '', suffix = '', decimals = 0 }) => {
   const isPositive = change >= 0;
   const isMobile = window.innerWidth < 768;
@@ -70,7 +68,6 @@ const MobileStatCard = ({ title, value, change, icon: Icon, color, prefix = '', 
         position: 'relative',
         overflow: 'hidden'
       }}>
-        {/* Background gradient */}
         {!isMobile && (
           <Box style={{
             position: 'absolute',
@@ -130,7 +127,6 @@ const MobileStatCard = ({ title, value, change, icon: Icon, color, prefix = '', 
   );
 };
 
-// Custom tooltip for charts
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     return (
@@ -192,7 +188,6 @@ const Dashboard = () => {
 
   const fetchData = async () => {
     try {
-      // Convert timeRange to appropriate API parameter
       let apiTimeRange = timeRange;
       if (timeRange === 'today') apiTimeRange = '1';
       if (timeRange === 'yesterday') apiTimeRange = '1';
@@ -202,7 +197,6 @@ const Dashboard = () => {
         ordersAPI.getAll()
       ]);
       
-      // Try to get analytics, but don't fail if it doesn't work
       let analyticsRes = null;
       try {
         analyticsRes = await statsAPI.getAnalytics(apiTimeRange);
@@ -212,7 +206,6 @@ const Dashboard = () => {
 
       setRecentOrders(ordersRes.orders?.slice(0, isMobile ? 3 : 5) || []);
       
-      // Filter orders based on selected time range
       let filteredOrders = ordersRes.orders || [];
       let previousPeriodOrders = [];
       
@@ -221,13 +214,11 @@ const Dashboard = () => {
       today.setHours(0, 0, 0, 0);
       
       if (timeRange === 'today') {
-        // Filter orders from today
         filteredOrders = ordersRes.orders?.filter(order => {
           const orderDate = new Date(order.created_at);
           return orderDate >= today;
         }) || [];
         
-        // Previous period = yesterday
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
         previousPeriodOrders = ordersRes.orders?.filter(order => {
@@ -236,7 +227,6 @@ const Dashboard = () => {
         }) || [];
         
       } else if (timeRange === 'yesterday') {
-        // Filter orders from yesterday
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
         filteredOrders = ordersRes.orders?.filter(order => {
@@ -244,7 +234,6 @@ const Dashboard = () => {
           return orderDate >= yesterday && orderDate < today;
         }) || [];
         
-        // Previous period = day before yesterday
         const dayBefore = new Date(yesterday);
         dayBefore.setDate(dayBefore.getDate() - 1);
         previousPeriodOrders = ordersRes.orders?.filter(order => {
@@ -253,7 +242,6 @@ const Dashboard = () => {
         }) || [];
         
       } else if (timeRange === '7') {
-        // Last 7 days
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         filteredOrders = ordersRes.orders?.filter(order => {
@@ -261,7 +249,6 @@ const Dashboard = () => {
           return orderDate >= sevenDaysAgo;
         }) || [];
         
-        // Previous period = 7 days before that
         const fourteenDaysAgo = new Date();
         fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
         previousPeriodOrders = ordersRes.orders?.filter(order => {
@@ -270,7 +257,6 @@ const Dashboard = () => {
         }) || [];
         
       } else if (timeRange === '30') {
-        // Last 30 days
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         filteredOrders = ordersRes.orders?.filter(order => {
@@ -278,7 +264,6 @@ const Dashboard = () => {
           return orderDate >= thirtyDaysAgo;
         }) || [];
         
-        // Previous period = 30 days before that
         const sixtyDaysAgo = new Date();
         sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
         previousPeriodOrders = ordersRes.orders?.filter(order => {
@@ -287,82 +272,66 @@ const Dashboard = () => {
         }) || [];
       }
       
-      // Calculate stats from filtered orders
-      const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
-      const uniqueUsers = new Set(filteredOrders.map(order => order.user_id || order.telegram_id)).size;
-      const avgOrderValue = filteredOrders.length > 0 ? totalRevenue / filteredOrders.length : 0;
+      const paidStatuses = ['completed', 'paid', 'processing'];
+      const paidOrders = filteredOrders.filter(order => paidStatuses.includes(order.status));
+      const prevPaidOrders = previousPeriodOrders.filter(order => paidStatuses.includes(order.status));
       
-      // FIXED PROFIT CALCULATION
       const calculateOrderProfit = (order) => {
-        // If order has profit_usdt field from backend, use it
         if (order.profit_usdt !== undefined && order.profit_usdt !== null) {
           return order.profit_usdt;
         }
         
         let totalProfit = 0;
         
-        // Calculate profit from items
         if (order.items && order.items.length > 0) {
           order.items.forEach(item => {
-            // Get the actual selling price per unit (after any item-level adjustments)
             const sellingPricePerUnit = item.price_usdt || 0;
             const purchasePricePerUnit = item.purchase_price_usdt || 0;
             const quantity = item.quantity || 1;
             
-            // Calculate base profit (selling - purchase) * quantity
             const baseProfit = (sellingPricePerUnit - purchasePricePerUnit) * quantity;
             totalProfit += baseProfit;
           });
         }
         
-        // IMPORTANT: Subtract the discount from total profit
-        // Because discount reduces what we actually receive
         const discountAmount = order.discount_amount || 0;
         totalProfit = totalProfit - discountAmount;
         
-        // If there's a seller commission, subtract it from profit
         if (order.seller_commission) {
           totalProfit = totalProfit - order.seller_commission;
         }
         
-        // Profit can be negative if discount is too high or costs are high
         return totalProfit;
       };
       
-      const totalProfit = filteredOrders.reduce((sum, order) => {
-        return sum + calculateOrderProfit(order);
-      }, 0);
+      const totalRevenue = paidOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
+      const totalProfit = paidOrders.reduce((sum, order) => sum + calculateOrderProfit(order), 0);
+      const uniqueUsers = new Set(filteredOrders.map(order => order.user_id || order.telegram_id)).size;
+      const avgOrderValue = paidOrders.length > 0 ? totalRevenue / paidOrders.length : 0;
       
-      // Calculate previous period stats for growth percentages
-      const prevRevenue = previousPeriodOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
-      const prevProfit = previousPeriodOrders.reduce((sum, order) => {
-        return sum + calculateOrderProfit(order);
-      }, 0);
+      const prevRevenue = prevPaidOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
+      const prevProfit = prevPaidOrders.reduce((sum, order) => sum + calculateOrderProfit(order), 0);
       const prevOrders = previousPeriodOrders.length;
       const prevUsers = new Set(previousPeriodOrders.map(order => order.user_id || order.telegram_id)).size;
-      const prevAvgOrder = previousPeriodOrders.length > 0 ? prevRevenue / previousPeriodOrders.length : 0;
+      const prevAvgOrder = prevPaidOrders.length > 0 ? prevRevenue / prevPaidOrders.length : 0;
       
-      // Calculate growth percentages
       const revenueGrowth = prevRevenue > 0 ? ((totalRevenue - prevRevenue) / prevRevenue) * 100 : 0;
       const profitGrowth = prevProfit > 0 ? ((totalProfit - prevProfit) / prevProfit) * 100 : 0;
       const ordersGrowth = prevOrders > 0 ? ((filteredOrders.length - prevOrders) / prevOrders) * 100 : 0;
       const usersGrowth = prevUsers > 0 ? ((uniqueUsers - prevUsers) / prevUsers) * 100 : 0;
       const avgOrderGrowth = prevAvgOrder > 0 ? ((avgOrderValue - prevAvgOrder) / prevAvgOrder) * 100 : 0;
       
-      // Set calculated stats
       const calculatedStats = {
         total_revenue_usdt: totalRevenue,
         total_profit_usdt: totalProfit,
         total_orders: filteredOrders.length,
         total_users: uniqueUsers,
         avg_order_value: avgOrderValue,
-        // Growth percentages
         revenue_growth: revenueGrowth,
         profit_growth: profitGrowth,
         orders_growth: ordersGrowth,
         users_growth: usersGrowth,
         avg_order_growth: avgOrderGrowth,
-        // Keep other stats from API if available
         top_products: statsRes.stats?.top_products || [],
         total_products: statsRes.stats?.total_products || 0,
         total_categories: statsRes.stats?.total_categories || 0
@@ -370,14 +339,12 @@ const Dashboard = () => {
       
       setStats(calculatedStats);
       
-      // Process analytics data for charts
       if (timeRange === 'today' || timeRange === 'yesterday') {
         const targetDate = timeRange === 'today' ? new Date() : new Date(Date.now() - 86400000);
         targetDate.setHours(0, 0, 0, 0);
         const endDate = new Date(targetDate);
         endDate.setDate(endDate.getDate() + 1);
         
-        // Generate hourly data
         const hourlyData = [];
         const maxHour = timeRange === 'today' ? new Date().getHours() : 23;
         
@@ -387,14 +354,17 @@ const Dashboard = () => {
             return orderDate.getHours() === hour;
           });
           
-          const hourRevenue = hourOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
-          const hourProfit = hourOrders.reduce((sum, order) => sum + calculateOrderProfit(order), 0);
+          const hourPaidOrders = hourOrders.filter(order => paidStatuses.includes(order.status));
+          
+          const hourRevenue = hourPaidOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
+          const hourProfit = hourPaidOrders.reduce((sum, order) => sum + calculateOrderProfit(order), 0);
+          const hourAllOrdersSum = hourOrders.reduce((sum, order) => sum + (order.total_usdt || 0), 0);
           
           hourlyData.push({
             _id: `${hour.toString().padStart(2, '0')}:00`,
             revenue: hourRevenue,
             profit: hourProfit,
-            orders: hourOrders.length
+            allOrders: hourAllOrdersSum
           });
         }
         
@@ -404,7 +374,6 @@ const Dashboard = () => {
           hourly_distribution: analyticsRes?.hourly_distribution || []
         });
       } else {
-        // For longer time ranges, use daily aggregation
         const dailyMap = new Map();
         
         filteredOrders.forEach(order => {
@@ -416,14 +385,16 @@ const Dashboard = () => {
               _id: dateKey,
               revenue: 0,
               profit: 0,
-              orders: 0
+              allOrders: 0
             });
           }
           
           const dayData = dailyMap.get(dateKey);
-          dayData.revenue += order.total_usdt || 0;
-          dayData.profit += calculateOrderProfit(order);
-          dayData.orders += 1;
+          if (paidStatuses.includes(order.status)) {
+            dayData.revenue += order.total_usdt || 0;
+            dayData.profit += calculateOrderProfit(order);
+          }
+          dayData.allOrders += order.total_usdt || 0;
         });
         
         const dailyData = Array.from(dailyMap.values()).sort((a, b) => a._id.localeCompare(b._id));
@@ -495,7 +466,6 @@ const Dashboard = () => {
     return typeof price === 'number' ? price.toFixed(2) : '0.00';
   };
 
-  // Chart colors
   const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899'];
 
   if (loading) {
@@ -518,7 +488,6 @@ const Dashboard = () => {
     '30': isMobile ? '30 days' : 'Last 30 days'
   };
 
-  // Get appropriate icon for time range
   const getTimeRangeIcon = () => {
     switch(timeRange) {
       case 'today':
@@ -530,12 +499,10 @@ const Dashboard = () => {
     }
   };
 
-  // Format X-axis based on time range
   const formatXAxis = (value) => {
     if (timeRange === 'today' || timeRange === 'yesterday') {
-      return value; // Already formatted as hour
+      return value;
     } else {
-      // For date format, show month/day
       if (value && value.includes('-')) {
         const parts = value.split('-');
         return `${parts[1]}/${parts[2]}`;
@@ -544,7 +511,6 @@ const Dashboard = () => {
     }
   };
 
-  // Render chart based on active tab
   const renderChart = () => {
     const chartData = analytics.daily_sales || [];
     
@@ -569,6 +535,10 @@ const Dashboard = () => {
             <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
               <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="colorAllOrders" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
+              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -601,6 +571,16 @@ const Dashboard = () => {
             strokeWidth={2}
             name="Profit"
           />
+          <Area 
+            type="monotone" 
+            dataKey="allOrders" 
+            stroke="#f59e0b" 
+            fillOpacity={1} 
+            fill="url(#colorAllOrders)"
+            strokeWidth={2}
+            strokeDasharray="5 5"
+            name="All Orders"
+          />
         </AreaChart>
       );
     } else if (activeChart === 'bar') {
@@ -620,6 +600,7 @@ const Dashboard = () => {
           <Tooltip content={<CustomTooltip />} />
           <Bar dataKey="revenue" fill="#8b5cf6" radius={[8, 8, 0, 0]} name="Revenue" />
           <Bar dataKey="profit" fill="#10b981" radius={[8, 8, 0, 0]} name="Profit" />
+          <Bar dataKey="allOrders" fill="#f59e0b" radius={[8, 8, 0, 0]} name="All Orders" />
         </BarChart>
       );
     } else {
@@ -655,17 +636,25 @@ const Dashboard = () => {
             activeDot={{ r: 6 }}
             name="Profit"
           />
+          <Line 
+            type="monotone" 
+            dataKey="allOrders" 
+            stroke="#f59e0b" 
+            strokeWidth={3}
+            strokeDasharray="5 5"
+            dot={{ r: 4, fill: '#f59e0b' }}
+            activeDot={{ r: 6 }}
+            name="All Orders"
+          />
         </LineChart>
       );
     }
   };
 
-  // Add warning if profit is negative
   const profitWarning = stats.total_profit_usdt < 0;
 
   return (
     <Box style={{ paddingBottom: isMobile ? '80px' : '0' }}>
-      {/* Header - Mobile Optimized */}
       <Flex 
         align={isMobile ? 'start' : 'center'} 
         justify="between" 
@@ -755,7 +744,6 @@ const Dashboard = () => {
         </Flex>
       </Flex>
 
-      {/* Live indicator for today */}
       {timeRange === 'today' && (
         <Flex align="center" gap="2" mb="4">
           <Box style={{
@@ -771,7 +759,6 @@ const Dashboard = () => {
         </Flex>
       )}
 
-      {/* Profit warning if negative */}
       {profitWarning && (
         <Card style={{
           background: 'rgba(239, 68, 68, 0.1)',
@@ -788,7 +775,6 @@ const Dashboard = () => {
         </Card>
       )}
 
-      {/* Stats Grid - Mobile Responsive */}
       <Grid 
         columns={{ 
           initial: '2', 
@@ -836,9 +822,7 @@ const Dashboard = () => {
         />
       </Grid>
 
-      {/* Charts Section */}
       <Grid columns={{ initial: '1', lg: '3' }} gap={isMobile ? '3' : '4'} mb={isMobile ? '4' : '6'}>
-        {/* Main Chart */}
         <Box style={{ gridColumn: isMobile ? 'span 1' : 'span 2' }}>
           <Card style={{
             background: 'rgba(20, 20, 25, 0.6)',
@@ -885,7 +869,6 @@ const Dashboard = () => {
           </Card>
         </Box>
 
-        {/* Category Distribution - Desktop Only */}
         {!isMobile && analytics.category_sales.length > 0 && (
           <Card style={{
             background: 'rgba(20, 20, 25, 0.6)',
@@ -937,9 +920,7 @@ const Dashboard = () => {
         )}
       </Grid>
 
-      {/* Recent Activity */}
       <Grid columns={{ initial: '1', lg: '2' }} gap={isMobile ? '3' : '4'}>
-        {/* Recent Orders */}
         <Card style={{
           background: 'rgba(20, 20, 25, 0.6)',
           backdropFilter: 'blur(20px)',
@@ -1013,7 +994,6 @@ const Dashboard = () => {
           </Flex>
         </Card>
 
-        {/* Top Products */}
         <Card style={{
           background: 'rgba(20, 20, 25, 0.6)',
           backdropFilter: 'blur(20px)',
@@ -1026,7 +1006,6 @@ const Dashboard = () => {
           
           <Flex direction="column" gap={isMobile ? '2' : '3'}>
             {(stats.top_products || []).slice(0, 5).map((product, idx) => {
-              // Calculate actual profit for this product
               const profitPerUnit = (product.price_usdt - (product.purchase_price_usdt || 0));
               const totalProductProfit = profitPerUnit * product.sold_count;
               
@@ -1090,7 +1069,6 @@ const Dashboard = () => {
         </Card>
       </Grid>
 
-      {/* Danger Zone Modal */}
       <AlertDialog.Root open={dangerZoneOpen} onOpenChange={setDangerZoneOpen}>
         <AlertDialog.Content style={{ maxWidth: isMobile ? '90%' : 500 }}>
           <AlertDialog.Title>
