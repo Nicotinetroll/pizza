@@ -1,4 +1,5 @@
 # backend/main_modules/endpoints_payouts.py
+# FIXED VERSION - Corrected profit calculations to match dashboard
 
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
@@ -31,12 +32,14 @@ class Expense(BaseModel):
     description: Optional[str] = None
     due_date: Optional[datetime] = None
     status: str = "pending"
+    apply_per_order: bool = False  # If true, deduct from each order
 
 class PayoutTransaction(BaseModel):
     partner_id: str
     amount: float
     description: Optional[str] = None
     transaction_id: Optional[str] = None
+    payment_method: Optional[str] = "USDT"
     notes: Optional[str] = None
 
 # Get all payout partners
@@ -138,16 +141,27 @@ async def update_payout_partner(partner_id: str, partner: PayoutPartner):
 
 # Delete payout partner
 @router.delete("/partners/{partner_id}")
-async def delete_payout_partner(partner_id: str):
+async def delete_payout_partner(partner_id: str, hard: bool = False):
     try:
-        # Soft delete - just mark as inactive
-        result = await db.payout_partners.update_one(
-            {"_id": ObjectId(partner_id)},
-            {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
-        )
-        
-        if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="Partner not found")
+        if hard:
+            # Hard delete - remove completely
+            # First delete all related payout transactions
+            await db.payout_transactions.delete_many({"partner_id": ObjectId(partner_id)})
+            
+            # Then delete the partner
+            result = await db.payout_partners.delete_one({"_id": ObjectId(partner_id)})
+            
+            if result.deleted_count == 0:
+                raise HTTPException(status_code=404, detail="Partner not found")
+        else:
+            # Soft delete - just mark as inactive
+            result = await db.payout_partners.update_one(
+                {"_id": ObjectId(partner_id)},
+                {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
+            )
+            
+            if result.matched_count == 0:
+                raise HTTPException(status_code=404, detail="Partner not found")
         
         return {"success": True}
     except Exception as e:
@@ -217,7 +231,7 @@ async def pay_expense(expense_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Get payout calculations for all orders
+# Get payout calculations for all orders - FIXED VERSION
 @router.get("/calculations")
 async def get_payout_calculations():
     try:
@@ -230,6 +244,10 @@ async def get_payout_calculations():
         orders = await db.orders.find(
             {"status": {"$in": ["paid", "completed", "processing"]}}
         ).sort("created_at", -1).limit(100).to_list(None)
+        
+        # Pre-fetch all products for performance
+        all_products = await db.products.find({}).to_list(None)
+        products_by_name = {p["name"]: p for p in all_products}
         
         calculations = []
         total_partner_payouts = {}
@@ -244,24 +262,50 @@ async def get_payout_calculations():
                 "final_profit": 0
             }
             
-            # Calculate base profit
+            # Calculate base profit - EXACTLY like dashboard does it
             base_profit = 0
-            for item in order.get("items", []):
-                selling_price = float(item.get("price_usdt", 0))
-                purchase_price = float(item.get("purchase_price_usdt", 0))
-                quantity = item.get("quantity", 1)
-                base_profit += (selling_price - purchase_price) * quantity
+            if order.get("items") and len(order["items"]) > 0:
+                for item in order["items"]:
+                    selling_price = float(item.get("price_usdt", 0))
+                    quantity = item.get("quantity", 1)
+                    
+                    # First try to get purchase price from the item itself (if it was saved with the order)
+                    purchase_price = float(item.get("purchase_price_usdt", 0))
+                    
+                    # If not in item, try to find product by name
+                    if purchase_price == 0:
+                        product_name = item.get("product_name", "")
+                        product = products_by_name.get(product_name)
+                        if product:
+                            purchase_price = float(product.get("purchase_price_usdt", 0))
+                    
+                    # Calculate profit for this item
+                    item_profit = (selling_price - purchase_price) * quantity
+                    base_profit += item_profit
             
             order_calc["base_profit"] = base_profit
+            
+            # Start with base profit and deduct from there
             current_profit = base_profit
+            
+            # Subtract discount from profit (discount reduces our profit!)
+            discount_amount = float(order.get("discount_amount", 0))
+            if discount_amount > 0:
+                order_calc["deductions"].append({
+                    "type": "discount",
+                    "name": "Customer Discount",
+                    "rate": 0,
+                    "amount": discount_amount
+                })
+                current_profit -= discount_amount
             
             # Apply seller commission if exists
             if order.get("referral_code"):
-                referral = await db.referrals.find_one({"code": order["referral_code"]})
+                referral = await db.referral_codes.find_one({"code": order["referral_code"]})
                 if referral and referral.get("seller_id"):
-                    seller = await db.sellers.find_one({"_id": referral["seller_id"]})
-                    if seller:
-                        commission_rate = float(seller.get("commission_percentage", 0))
+                    seller = await db.sellers.find_one({"_id": ObjectId(referral["seller_id"])})
+                    if seller and current_profit > 0:  # Only pay commission on positive profit
+                        commission_rate = float(seller.get("commission_percentage", 30))
                         commission = current_profit * (commission_rate / 100)
                         order_calc["deductions"].append({
                             "type": "seller_commission",
@@ -271,10 +315,11 @@ async def get_payout_calculations():
                         })
                         current_profit -= commission
             
-            # Apply partner commissions in priority order
+            # Apply partner commissions in priority order (from remaining profit after seller commission)
             for partner in partners:
-                if partner["type"] == "partner" and partner.get("commission_percentage"):
+                if partner["type"] == "partner" and partner.get("commission_percentage") and current_profit > 0:
                     commission_rate = float(partner["commission_percentage"])
+                    # Partner commission is calculated from the remaining profit after seller commission
                     commission = current_profit * (commission_rate / 100)
                     
                     order_calc["deductions"].append({
@@ -296,9 +341,10 @@ async def get_payout_calculations():
                     total_partner_payouts[partner_id]["total"] += commission
                     total_partner_payouts[partner_id]["count"] += 1
                     
+                    # Deduct this partner's commission from the remaining profit
                     current_profit -= commission
             
-            order_calc["final_profit"] = current_profit
+            order_calc["final_profit"] = max(0, current_profit)  # Ensure final profit is not negative
             calculations.append(order_calc)
         
         return {
@@ -329,11 +375,24 @@ async def process_payout(transaction: PayoutTransaction):
             "status": "paid",
             "paid_at": datetime.utcnow(),
             "transaction_id": transaction.transaction_id,
+            "payment_method": transaction.payment_method if hasattr(transaction, 'payment_method') else "USDT",
             "notes": transaction.notes,
             "created_at": datetime.utcnow()
         }
         
         result = await db.payout_transactions.insert_one(payout_dict)
+        
+        # Log the payment in audit
+        await db.audit_logs.insert_one({
+            "action": "PAYOUT_PROCESSED",
+            "entity_type": "partner",
+            "entity_id": ObjectId(transaction.partner_id),
+            "details": {
+                "amount": transaction.amount,
+                "transaction_id": transaction.transaction_id
+            },
+            "timestamp": datetime.utcnow()
+        })
         
         return {"success": True, "id": str(result.inserted_id)}
     except Exception as e:
@@ -354,6 +413,9 @@ async def get_payout_history(partner_id: Optional[str] = None):
             transaction["partner_id"] = str(transaction["partner_id"])
             if transaction.get("order_id"):
                 transaction["order_id"] = str(transaction["order_id"])
+            # Add payment_method if not present
+            if "payment_method" not in transaction:
+                transaction["payment_method"] = "USDT"
         
         return {"transactions": history}
     except Exception as e:
@@ -367,18 +429,30 @@ async def get_payout_stats():
         now = datetime.utcnow()
         month_start = datetime(now.year, now.month, 1)
         
-        # Total pending payouts
+        # Get active partner IDs
+        active_partners = await db.payout_partners.find(
+            {"is_active": True}
+        ).to_list(None)
+        active_partner_ids = [p["_id"] for p in active_partners]
+        
+        # Total pending payouts (only for active partners)
         pending_payouts = await db.payout_transactions.aggregate([
-            {"$match": {"status": "pending"}},
+            {
+                "$match": {
+                    "status": "pending",
+                    "partner_id": {"$in": active_partner_ids}
+                }
+            },
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ]).to_list(1)
         
-        # This month's payouts
+        # This month's payouts (only for active partners)
         monthly_payouts = await db.payout_transactions.aggregate([
             {
                 "$match": {
                     "status": "paid",
-                    "paid_at": {"$gte": month_start}
+                    "paid_at": {"$gte": month_start},
+                    "partner_id": {"$in": active_partner_ids}
                 }
             },
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
@@ -391,13 +465,13 @@ async def get_payout_stats():
         ]).to_list(1)
         
         # Active partners count
-        active_partners = await db.payout_partners.count_documents({"is_active": True})
+        active_partners_count = len(active_partners)
         
         return {
             "total_pending": pending_payouts[0]["total"] if pending_payouts else 0,
             "monthly_paid": monthly_payouts[0]["total"] if monthly_payouts else 0,
             "pending_expenses": pending_expenses[0]["total"] if pending_expenses else 0,
-            "active_partners": active_partners
+            "active_partners": active_partners_count
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

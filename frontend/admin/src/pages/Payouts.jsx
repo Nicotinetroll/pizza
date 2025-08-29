@@ -1,4 +1,5 @@
 // frontend/admin/src/pages/Payouts.jsx
+// COMPLETE FIXED VERSION with proper pending calculations
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,10 +13,15 @@ import {
     PersonIcon, PlusIcon, Pencil1Icon, TrashIcon, EyeOpenIcon,
     RocketIcon, ReloadIcon, CheckCircledIcon, CrossCircledIcon,
     CardStackIcon, TimerIcon, TokensIcon, ArrowUpIcon,
-    ExclamationTriangleIcon, Share1Icon,
-    BarChartIcon, ActivityLogIcon, TargetIcon
+    ExclamationTriangleIcon, Share1Icon, DotsHorizontalIcon,
+    BarChartIcon, ActivityLogIcon, TargetIcon, CopyIcon,
+    DownloadIcon, FileTextIcon, ClockIcon
 } from '@radix-ui/react-icons';
 import { payoutsAPI } from '../services/api';
+import PayoutProcess from './PayoutProcess';
+import PartnerFormModal from '../components/payouts/PartnerFormModal';
+import ExpenseFormModal from '../components/payouts/ExpenseFormModal';
+import PayoutHistoryModal from '../components/payouts/PayoutHistoryModal';
 
 // Stats Cards Component
 const StatsCard = ({ title, value, change, icon: Icon, color, prefix = '', suffix = '' }) => {
@@ -71,422 +77,6 @@ const StatsCard = ({ title, value, change, icon: Icon, color, prefix = '', suffi
     );
 };
 
-// Partner Form Modal
-const PartnerFormModal = ({ partner, isOpen, onClose, onSave }) => {
-    const [formData, setFormData] = useState({
-        name: '',
-        type: 'partner',
-        commission_percentage: 10,
-        fixed_amount: 0,
-        description: '',
-        payment_method: 'USDT',
-        payment_address: '',
-        priority: 1,
-        is_active: true
-    });
-    const [saving, setSaving] = useState(false);
-    const [errors, setErrors] = useState({});
-
-    useEffect(() => {
-        if (partner) {
-            setFormData(partner);
-        } else {
-            setFormData({
-                name: '',
-                type: 'partner',
-                commission_percentage: 10,
-                fixed_amount: 0,
-                description: '',
-                payment_method: 'USDT',
-                payment_address: '',
-                priority: 1,
-                is_active: true
-            });
-        }
-        setErrors({});
-    }, [partner, isOpen]);
-
-    const validate = () => {
-        const newErrors = {};
-        if (!formData.name) newErrors.name = 'Name is required';
-
-        if (formData.type === 'partner') {
-            if (!formData.commission_percentage || formData.commission_percentage <= 0) {
-                newErrors.commission_percentage = 'Commission must be greater than 0';
-            }
-            if (formData.commission_percentage > 100) {
-                newErrors.commission_percentage = 'Commission cannot exceed 100%';
-            }
-        } else {
-            if (!formData.fixed_amount || formData.fixed_amount <= 0) {
-                newErrors.fixed_amount = 'Fixed amount must be greater than 0';
-            }
-        }
-
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
-
-    const handleSubmit = async () => {
-        if (!validate()) return;
-        setSaving(true);
-        await onSave(formData, partner?._id);
-        setSaving(false);
-        onClose();
-    };
-
-    return (
-        <Dialog.Root open={isOpen} onOpenChange={onClose}>
-            <Dialog.Content style={{ maxWidth: '600px', padding: '24px' }}>
-                <Dialog.Title>
-                    {partner ? 'Edit Payout Partner' : 'Add Payout Partner'}
-                </Dialog.Title>
-                <Dialog.Description>
-                    <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                        {partner ? 'Update partner details and commission settings.' : 'Add a new partner who receives commission from your profits.'}
-                    </Text>
-                </Dialog.Description>
-
-                <Box mt="5">
-                    <Flex direction="column" gap="4">
-                        <Box>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                Partner Type *
-                            </Text>
-                            <Select.Root value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})}>
-                                <Select.Trigger style={{ width: '100%' }} />
-                                <Select.Content>
-                                    <Select.Item value="partner">Commission Partner (% of profit)</Select.Item>
-                                    <Select.Item value="service">Service Provider (fixed amount)</Select.Item>
-                                </Select.Content>
-                            </Select.Root>
-                        </Box>
-
-                        <Box>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                Name *
-                            </Text>
-                            <TextField.Root
-                                size="3"
-                                placeholder="e.g., Erik"
-                                value={formData.name}
-                                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                                style={{
-                                    background: 'rgba(255, 255, 255, 0.05)',
-                                    border: errors.name ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)'
-                                }}
-                            />
-                            {errors.name && (
-                                <Text size="1" style={{ color: '#ef4444', marginTop: '4px' }}>
-                                    {errors.name}
-                                </Text>
-                            )}
-                        </Box>
-
-                        {formData.type === 'partner' ? (
-                            <Box>
-                                <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                    Commission Percentage (%) *
-                                </Text>
-                                <TextField.Root
-                                    size="3"
-                                    type="number"
-                                    min="0"
-                                    max="100"
-                                    step="0.1"
-                                    value={formData.commission_percentage}
-                                    onChange={(e) => setFormData({...formData, commission_percentage: parseFloat(e.target.value) || 0})}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.05)',
-                                        border: errors.commission_percentage ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)'
-                                    }}
-                                />
-                                {errors.commission_percentage && (
-                                    <Text size="1" style={{ color: '#ef4444', marginTop: '4px' }}>
-                                        {errors.commission_percentage}
-                                    </Text>
-                                )}
-                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', marginTop: '4px' }}>
-                                    This percentage will be calculated from the net profit after seller commissions
-                                </Text>
-                            </Box>
-                        ) : (
-                            <Box>
-                                <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                    Fixed Amount (USDT) *
-                                </Text>
-                                <TextField.Root
-                                    size="3"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={formData.fixed_amount}
-                                    onChange={(e) => setFormData({...formData, fixed_amount: parseFloat(e.target.value) || 0})}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.05)',
-                                        border: errors.fixed_amount ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)'
-                                    }}
-                                />
-                                {errors.fixed_amount && (
-                                    <Text size="1" style={{ color: '#ef4444', marginTop: '4px' }}>
-                                        {errors.fixed_amount}
-                                    </Text>
-                                )}
-                            </Box>
-                        )}
-
-                        <Grid columns="2" gap="4">
-                            <Box>
-                                <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                    Priority Order
-                                </Text>
-                                <TextField.Root
-                                    size="3"
-                                    type="number"
-                                    min="1"
-                                    value={formData.priority}
-                                    onChange={(e) => setFormData({...formData, priority: parseInt(e.target.value) || 1})}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.05)',
-                                        border: '1px solid rgba(255, 255, 255, 0.1)'
-                                    }}
-                                />
-                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', marginTop: '4px' }}>
-                                    Lower numbers are calculated first
-                                </Text>
-                            </Box>
-
-                            <Box>
-                                <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                    Payment Method
-                                </Text>
-                                <TextField.Root
-                                    size="3"
-                                    placeholder="e.g., USDT"
-                                    value={formData.payment_method}
-                                    onChange={(e) => setFormData({...formData, payment_method: e.target.value})}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.05)',
-                                        border: '1px solid rgba(255, 255, 255, 0.1)'
-                                    }}
-                                />
-                            </Box>
-                        </Grid>
-
-                        <Box>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                Payment Address
-                            </Text>
-                            <TextField.Root
-                                size="3"
-                                placeholder="Wallet address or account details"
-                                value={formData.payment_address}
-                                onChange={(e) => setFormData({...formData, payment_address: e.target.value})}
-                                style={{
-                                    background: 'rgba(255, 255, 255, 0.05)',
-                                    border: '1px solid rgba(255, 255, 255, 0.1)'
-                                }}
-                            />
-                        </Box>
-
-                        <Box>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                Description
-                            </Text>
-                            <TextArea
-                                placeholder="e.g., Business partner - 10% of net profit"
-                                value={formData.description}
-                                onChange={(e) => setFormData({...formData, description: e.target.value})}
-                                style={{
-                                    background: 'rgba(255, 255, 255, 0.05)',
-                                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                                    minHeight: '80px'
-                                }}
-                            />
-                        </Box>
-
-                        <Card style={{
-                            background: 'rgba(139, 92, 246, 0.05)',
-                            border: '1px solid rgba(139, 92, 246, 0.2)'
-                        }}>
-                            <Flex align="center" justify="between">
-                                <Box>
-                                    <Text size="2" weight="medium">Active Status</Text>
-                                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.6)', marginTop: '4px' }}>
-                                        {formData.is_active ? 'Partner will receive payouts' : 'Partner is inactive'}
-                                    </Text>
-                                </Box>
-                                <Switch
-                                    size="3"
-                                    checked={formData.is_active}
-                                    onCheckedChange={(checked) => setFormData({...formData, is_active: checked})}
-                                />
-                            </Flex>
-                        </Card>
-
-                        <Flex gap="3" justify="end" mt="4">
-                            <Dialog.Close>
-                                <Button variant="soft" size="3">Cancel</Button>
-                            </Dialog.Close>
-                            <Button
-                                size="3"
-                                disabled={saving}
-                                onClick={handleSubmit}
-                                style={{
-                                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                    cursor: saving ? 'not-allowed' : 'pointer',
-                                    opacity: saving ? 0.7 : 1
-                                }}
-                            >
-                                {saving ? 'Saving...' : (partner ? 'Update' : 'Create')} Partner
-                            </Button>
-                        </Flex>
-                    </Flex>
-                </Box>
-            </Dialog.Content>
-        </Dialog.Root>
-    );
-};
-
-// Expense Form Modal
-const ExpenseFormModal = ({ isOpen, onClose, onSave }) => {
-    const [formData, setFormData] = useState({
-        name: '',
-        type: 'shipping',
-        amount: 0,
-        description: '',
-        due_date: ''
-    });
-    const [saving, setSaving] = useState(false);
-
-    const handleSubmit = async () => {
-        if (!formData.name || formData.amount <= 0) {
-            alert('Please fill in all required fields');
-            return;
-        }
-        setSaving(true);
-
-        // Clean up the data before sending
-        const submitData = {
-            ...formData,
-            due_date: formData.due_date || null  // Convert empty string to null
-        };
-
-        await onSave(submitData);
-        setSaving(false);
-        setFormData({
-            name: '',
-            type: 'shipping',
-            amount: 0,
-            description: '',
-            due_date: ''
-        });
-        onClose();
-    };
-
-    return (
-        <Dialog.Root open={isOpen} onOpenChange={onClose}>
-            <Dialog.Content style={{ maxWidth: '500px', padding: '24px' }}>
-                <Dialog.Title>
-                    Add Expense
-                </Dialog.Title>
-                <Dialog.Description>
-                    <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                        Track shipping costs, fees, and other business expenses.
-                    </Text>
-                </Dialog.Description>
-
-                <Box mt="5">
-                    <Flex direction="column" gap="4">
-                        <Box>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                Expense Name *
-                            </Text>
-                            <TextField.Root
-                                size="3"
-                                placeholder="e.g., DHL Shipping"
-                                value={formData.name}
-                                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                            />
-                        </Box>
-
-                        <Grid columns="2" gap="4">
-                            <Box>
-                                <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                    Type *
-                                </Text>
-                                <Select.Root value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})}>
-                                    <Select.Trigger style={{ width: '100%' }} />
-                                    <Select.Content>
-                                        <Select.Item value="shipping">Shipping</Select.Item>
-                                        <Select.Item value="fee">Fee</Select.Item>
-                                        <Select.Item value="tax">Tax</Select.Item>
-                                        <Select.Item value="other">Other</Select.Item>
-                                    </Select.Content>
-                                </Select.Root>
-                            </Box>
-
-                            <Box>
-                                <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                    Amount (USDT) *
-                                </Text>
-                                <TextField.Root
-                                    size="3"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={formData.amount}
-                                    onChange={(e) => setFormData({...formData, amount: parseFloat(e.target.value) || 0})}
-                                />
-                            </Box>
-                        </Grid>
-
-                        <Box>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                Due Date
-                            </Text>
-                            <TextField.Root
-                                size="3"
-                                type="date"
-                                value={formData.due_date}
-                                onChange={(e) => setFormData({...formData, due_date: e.target.value})}
-                            />
-                        </Box>
-
-                        <Box>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                Description
-                            </Text>
-                            <TextArea
-                                placeholder="Additional details..."
-                                value={formData.description}
-                                onChange={(e) => setFormData({...formData, description: e.target.value})}
-                                style={{ minHeight: '80px' }}
-                            />
-                        </Box>
-
-                        <Flex gap="3" justify="end" mt="4">
-                            <Dialog.Close>
-                                <Button variant="soft" size="3">Cancel</Button>
-                            </Dialog.Close>
-                            <Button
-                                size="3"
-                                disabled={saving}
-                                onClick={handleSubmit}
-                                style={{
-                                    background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                                }}
-                            >
-                                {saving ? 'Adding...' : 'Add Expense'}
-                            </Button>
-                        </Flex>
-                    </Flex>
-                </Box>
-            </Dialog.Content>
-        </Dialog.Root>
-    );
-};
-
 // Main Payouts Component
 const Payouts = () => {
     const [partners, setPartners] = useState([]);
@@ -501,6 +91,10 @@ const Payouts = () => {
     const [partnerModalOpen, setPartnerModalOpen] = useState(false);
     const [selectedPartner, setSelectedPartner] = useState(null);
     const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+    const [payoutProcessOpen, setPayoutProcessOpen] = useState(false);
+    const [selectedPayoutPartner, setSelectedPayoutPartner] = useState(null);
+    const [historyModalOpen, setHistoryModalOpen] = useState(false);
+    const [selectedHistoryPartner, setSelectedHistoryPartner] = useState(null);
 
     useEffect(() => {
         fetchData();
@@ -508,14 +102,65 @@ const Payouts = () => {
 
     const fetchData = async () => {
         try {
-            const [partnersRes, expensesRes, statsRes, calculationsRes] = await Promise.all([
+            const [partnersRes, expensesRes, statsRes, calculationsRes, historyRes] = await Promise.all([
                 payoutsAPI.getPartners(),
                 payoutsAPI.getExpenses(),
                 payoutsAPI.getStats(),
-                payoutsAPI.getCalculations()
+                payoutsAPI.getCalculations(),
+                payoutsAPI.getHistory() // Get all payment history
             ]);
 
-            setPartners(partnersRes.partners || []);
+            // Calculate actual pending amounts from calculations
+            const partnerPending = {};
+            if (calculationsRes.calculations) {
+                calculationsRes.calculations.forEach(calc => {
+                    calc.deductions.forEach(d => {
+                        if (d.type === 'partner_commission') {
+                            const partner = partnersRes.partners?.find(p => p.name === d.name);
+                            if (partner) {
+                                const partnerId = partner._id;
+                                if (!partnerPending[partnerId]) {
+                                    partnerPending[partnerId] = {
+                                        amount: 0,
+                                        count: 0
+                                    };
+                                }
+                                partnerPending[partnerId].amount += d.amount;
+                                partnerPending[partnerId].count += 1;
+                            }
+                        }
+                    });
+                });
+            }
+
+            // Calculate total paid for each partner from history
+            const partnerPaid = {};
+            if (historyRes.transactions) {
+                historyRes.transactions.forEach(transaction => {
+                    if (transaction.status === 'paid' && transaction.partner_id) {
+                        if (!partnerPaid[transaction.partner_id]) {
+                            partnerPaid[transaction.partner_id] = 0;
+                        }
+                        partnerPaid[transaction.partner_id] += transaction.amount;
+                    }
+                });
+            }
+
+            // Update partners with calculated pending amounts
+            const updatedPartners = (partnersRes.partners || []).map(partner => {
+                const totalOwed = partnerPending[partner._id]?.amount || 0;
+                const totalPaid = partnerPaid[partner._id] || 0;
+                const pendingAmount = Math.max(0, totalOwed - totalPaid);
+                
+                return {
+                    ...partner,
+                    pending_amount: pendingAmount,
+                    pending_count: partnerPending[partner._id]?.count || 0,
+                    total_paid: totalPaid
+                };
+            });
+
+            setPartners(updatedPartners);
             setExpenses(expensesRes.expenses || []);
             setStats(statsRes || {});
             setCalculations(calculationsRes.calculations || []);
@@ -546,9 +191,9 @@ const Payouts = () => {
     };
 
     const handleDeletePartner = async (partnerId, partnerName) => {
-        if (confirm(`Are you sure you want to delete "${partnerName}"?`)) {
+        if (confirm(`Are you sure you want to delete "${partnerName}"? This will also delete all payment history for this partner.`)) {
             try {
-                await payoutsAPI.deletePartner(partnerId);
+                await payoutsAPI.deletePartner(partnerId, true); // true = hard delete
                 await fetchData();
             } catch (error) {
                 console.error('Error deleting partner:', error);
@@ -574,18 +219,16 @@ const Payouts = () => {
         }
     };
 
-    const handleProcessPayout = async (partnerId, amount) => {
-        const transactionId = prompt('Enter transaction ID (optional):');
-        const notes = prompt('Add notes (optional):');
+    const handleStartPayout = (partner) => {
+        setSelectedPayoutPartner(partner);
+        setPayoutProcessOpen(true);
+    };
 
+    const handleProcessPayout = async (payoutData) => {
         try {
-            await payoutsAPI.processPayout({
-                partner_id: partnerId,
-                amount,
-                transaction_id: transactionId,
-                notes
-            });
+            await payoutsAPI.processPayout(payoutData);
             await fetchData();
+            setPayoutProcessOpen(false);
             alert('✅ Payout processed successfully!');
         } catch (error) {
             console.error('Error processing payout:', error);
@@ -606,17 +249,15 @@ const Payouts = () => {
         );
     }
 
-    // Calculate total obligations
-    const totalObligations = (stats.total_pending || 0) + (stats.pending_expenses || 0);
-    const partnerTotals = calculations.reduce((acc, calc) => {
-        calc.deductions.forEach(d => {
-            if (d.type === 'partner_commission') {
-                if (!acc[d.name]) acc[d.name] = 0;
-                acc[d.name] += d.amount;
-            }
-        });
-        return acc;
-    }, {});
+    // Calculate total pending from partners
+    const totalPending = partners.reduce((sum, p) => sum + (p.pending_amount || 0), 0);
+    const totalObligations = totalPending + (stats.pending_expenses || 0);
+
+    // Get partner colors for avatars
+    const getPartnerColor = (index) => {
+        const colors = ['#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899'];
+        return colors[index % colors.length];
+    };
 
     return (
         <Box style={{ paddingBottom: isMobile ? '80px' : '0' }}>
@@ -633,7 +274,7 @@ const Payouts = () => {
                         Payouts & Obligations
                     </Heading>
                     <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginTop: '8px' }}>
-                        Manage partner commissions, expenses, and financial obligations
+                        Manage partner commissions and profit distribution
                     </Text>
                 </Box>
 
@@ -668,7 +309,7 @@ const Payouts = () => {
             </Flex>
 
             {/* Warning Banner */}
-            {totalObligations > 1000 && (
+            {totalObligations > 100 && (
                 <Card style={{
                     background: 'rgba(239, 68, 68, 0.1)',
                     border: '1px solid rgba(239, 68, 68, 0.3)',
@@ -698,7 +339,7 @@ const Payouts = () => {
             >
                 <StatsCard
                     title="Total Pending"
-                    value={stats.total_pending || 0}
+                    value={totalPending}
                     icon={TimerIcon}
                     color="#f59e0b"
                     prefix="$"
@@ -763,7 +404,7 @@ const Payouts = () => {
                                         </Table.Row>
                                     </Table.Header>
                                     <Table.Body>
-                                        {partners.map(partner => (
+                                        {partners.map((partner, index) => (
                                             <Table.Row key={partner._id}>
                                                 <Table.Cell style={{ padding: '16px' }}>
                                                     <Flex align="center" gap="3">
@@ -771,9 +412,9 @@ const Payouts = () => {
                                                             size="2"
                                                             fallback={partner.name.slice(0, 2).toUpperCase()}
                                                             style={{
-                                                                background: partner.type === 'partner'
-                                                                    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
-                                                                    : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                                                background: `linear-gradient(135deg, ${getPartnerColor(index)} 0%, ${getPartnerColor(index)}CC 100%)`,
+                                                                color: '#fff',
+                                                                fontWeight: 'bold'
                                                             }}
                                                         />
                                                         <Box>
@@ -809,7 +450,7 @@ const Payouts = () => {
                                                         </Text>
                                                         {partner.pending_count > 0 && (
                                                             <Badge size="1" color="orange">
-                                                                {partner.pending_count} items
+                                                                {partner.pending_count} orders
                                                             </Badge>
                                                         )}
                                                     </Flex>
@@ -844,18 +485,30 @@ const Payouts = () => {
                                                         >
                                                             <TrashIcon width="16" height="16" />
                                                         </IconButton>
+                                                        <IconButton
+                                                            size="2"
+                                                            variant="soft"
+                                                            color="blue"
+                                                            onClick={() => {
+                                                                setSelectedHistoryPartner(partner);
+                                                                setHistoryModalOpen(true);
+                                                            }}
+                                                        >
+                                                            <ClockIcon width="16" height="16" />
+                                                        </IconButton>
                                                         {partner.pending_amount > 0 && (
-                                                            <IconButton
+                                                            <Button
                                                                 size="2"
                                                                 variant="soft"
                                                                 style={{
                                                                     background: 'rgba(16, 185, 129, 0.2)',
                                                                     color: '#10b981'
                                                                 }}
-                                                                onClick={() => handleProcessPayout(partner._id, partner.pending_amount)}
+                                                                onClick={() => handleStartPayout(partner)}
                                                             >
-                                                                <CardStackIcon width="16" height="16" />
-                                                            </IconButton>
+                                                                <CardStackIcon width="14" height="14" />
+                                                                Pay
+                                                            </Button>
                                                         )}
                                                     </Flex>
                                                 </Table.Cell>
@@ -870,33 +523,35 @@ const Payouts = () => {
 
                 {/* Expenses Tab */}
                 <Tabs.Content value="expenses">
-                    <Flex justify="between" mb="4">
-                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                            Track shipping costs, fees, and other expenses
-                        </Text>
-                        <Button
-                            size="2"
-                            onClick={() => setExpenseModalOpen(true)}
-                            style={{
-                                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                            }}
-                        >
-                            <PlusIcon width="16" height="16" />
-                            Add Expense
-                        </Button>
-                    </Flex>
-
                     <Card style={{
                         background: 'linear-gradient(135deg, rgba(20, 20, 25, 0.6) 0%, rgba(30, 30, 35, 0.6) 100%)',
                         backdropFilter: 'blur(20px)',
                         border: '1px solid rgba(255, 255, 255, 0.05)',
-                        padding: 0,
-                        overflow: 'hidden'
+                        padding: '24px'
                     }}>
+                        <Flex justify="between" mb="4">
+                            <Box>
+                                <Heading size="4">Business Expenses</Heading>
+                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginTop: '4px' }}>
+                                    Track shipping costs, fees, and other expenses
+                                </Text>
+                            </Box>
+                            <Button
+                                size="3"
+                                onClick={() => setExpenseModalOpen(true)}
+                                style={{
+                                    background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                }}
+                            >
+                                <PlusIcon width="16" height="16" />
+                                Add Expense
+                            </Button>
+                        </Flex>
+
                         {expenses.length === 0 ? (
-                            <Box style={{ padding: '60px', textAlign: 'center' }}>
+                            <Box style={{ padding: '40px', textAlign: 'center' }}>
                                 <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                                    No expenses recorded yet
+                                    No expenses recorded yet. Start tracking your business expenses.
                                 </Text>
                             </Box>
                         ) : (
@@ -923,13 +578,18 @@ const Payouts = () => {
                                                                 {expense.description}
                                                             </Text>
                                                         )}
+                                                        {expense.apply_per_order && (
+                                                            <Badge size="1" color="purple" variant="soft" style={{ marginTop: '4px' }}>
+                                                                Recurring per order
+                                                            </Badge>
+                                                        )}
                                                     </Box>
                                                 </Table.Cell>
                                                 <Table.Cell>
                                                     <Badge color={
                                                         expense.type === 'shipping' ? 'blue' :
-                                                            expense.type === 'fee' ? 'purple' :
-                                                                expense.type === 'tax' ? 'orange' : 'gray'
+                                                        expense.type === 'fee' ? 'purple' :
+                                                        expense.type === 'tax' ? 'orange' : 'gray'
                                                     }>
                                                         {expense.type}
                                                     </Badge>
@@ -951,12 +611,22 @@ const Payouts = () => {
                                                     )}
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    <Badge color={expense.status === 'paid' ? 'green' : 'orange'}>
-                                                        {expense.status}
-                                                    </Badge>
+                                                    {expense.apply_per_order ? (
+                                                        <Badge color="purple">
+                                                            Per Order
+                                                        </Badge>
+                                                    ) : (
+                                                        <Badge color={expense.status === 'paid' ? 'green' : 'orange'}>
+                                                            {expense.status}
+                                                        </Badge>
+                                                    )}
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    {expense.status === 'pending' && (
+                                                    {expense.apply_per_order ? (
+                                                        <Badge variant="soft" color="purple">
+                                                            Auto-deducted
+                                                        </Badge>
+                                                    ) : expense.status === 'pending' ? (
                                                         <Button
                                                             size="2"
                                                             variant="soft"
@@ -966,6 +636,10 @@ const Payouts = () => {
                                                             <CheckCircledIcon width="14" height="14" />
                                                             Mark Paid
                                                         </Button>
+                                                    ) : (
+                                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                                            Paid
+                                                        </Text>
                                                     )}
                                                 </Table.Cell>
                                             </Table.Row>
@@ -992,7 +666,7 @@ const Payouts = () => {
                             Shows how profits are distributed after all commissions
                         </Text>
 
-                        {/* Summary */}
+                        {/* Summary Cards */}
                         <Grid columns={isMobile ? '1' : '3'} gap="4" mb="4">
                             <Card style={{
                                 background: 'rgba(139, 92, 246, 0.1)',
@@ -1032,132 +706,156 @@ const Payouts = () => {
                             </Card>
                         </Grid>
 
-                        {/* Partner Totals */}
-                        {Object.keys(partnerTotals).length > 0 && (
-                            <Card style={{
-                                background: 'rgba(255, 255, 255, 0.02)',
-                                border: '1px solid rgba(255, 255, 255, 0.05)',
-                                padding: '16px',
-                                marginBottom: '20px'
-                            }}>
-                                <Heading size="3" mb="3">Partner Commission Totals</Heading>
-                                <Grid columns={isMobile ? '1' : '2'} gap="3">
-                                    {Object.entries(partnerTotals).map(([name, total]) => (
-                                        <Flex key={name} align="center" justify="between" style={{
-                                            padding: '12px',
-                                            background: 'rgba(255, 255, 255, 0.02)',
-                                            borderRadius: '8px'
-                                        }}>
-                                            <Text size="2" weight="medium">{name}</Text>
-                                            <Text size="3" weight="bold" style={{ color: '#10b981' }}>
-                                                ${total.toFixed(2)}
-                                            </Text>
-                                        </Flex>
-                                    ))}
-                                </Grid>
-                            </Card>
-                        )}
-
                         {/* Recent Calculations */}
-                        <Heading size="3" mb="3">Recent Order Calculations</Heading>
-                        <ScrollArea style={{ maxHeight: '400px' }}>
-                            <Flex direction="column" gap="3">
-                                {calculations.slice(0, 10).map((calc, idx) => (
-                                    <Card key={idx} style={{
-                                        background: 'rgba(255, 255, 255, 0.02)',
-                                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                                        padding: '16px'
-                                    }}>
-                                        <Flex align="center" justify="between" mb="3">
-                                            <Text size="2" weight="medium">
-                                                {calc.order_number}
-                                            </Text>
-                                            <Badge size="1" variant="soft">
-                                                {new Date(calc.order_date).toLocaleDateString()}
-                                            </Badge>
-                                        </Flex>
-
-                                        <Grid columns={isMobile ? '1' : '4'} gap="2" mb="3">
-                                            <Box>
-                                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Order Total</Text>
-                                                <Text size="2" weight="bold">${calc.total_usdt.toFixed(2)}</Text>
-                                            </Box>
-                                            <Box>
-                                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Base Profit</Text>
-                                                <Text size="2" weight="bold" style={{ color: '#8b5cf6' }}>
-                                                    ${calc.base_profit.toFixed(2)}
-                                                </Text>
-                                            </Box>
-                                            <Box>
-                                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Total Deductions</Text>
-                                                <Text size="2" weight="bold" style={{ color: '#ef4444' }}>
-                                                    -${calc.deductions.reduce((sum, d) => sum + d.amount, 0).toFixed(2)}
-                                                </Text>
-                                            </Box>
-                                            <Box>
-                                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Final Profit</Text>
-                                                <Text size="2" weight="bold" style={{ color: '#10b981' }}>
-                                                    ${calc.final_profit.toFixed(2)}
-                                                </Text>
-                                            </Box>
-                                        </Grid>
-
-                                        {calc.deductions.length > 0 && (
-                                            <Box>
-                                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', marginBottom: '8px' }}>
-                                                    Deductions:
-                                                </Text>
-                                                <Flex direction="column" gap="1">
-                                                    {calc.deductions.map((deduction, dIdx) => (
-                                                        <Flex key={dIdx} align="center" justify="between" style={{
-                                                            padding: '6px 8px',
-                                                            background: 'rgba(255, 255, 255, 0.02)',
-                                                            borderRadius: '4px'
-                                                        }}>
-                                                            <Flex align="center" gap="2">
-                                                                <Badge size="1" color={
-                                                                    deduction.type === 'seller_commission' ? 'purple' :
-                                                                        deduction.type === 'partner_commission' ? 'green' : 'orange'
-                                                                }>
-                                                                    {deduction.type === 'seller_commission' ? 'Seller' : 'Partner'}
-                                                                </Badge>
-                                                                <Text size="1">{deduction.name}</Text>
-                                                                <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                                                                    ({deduction.rate}%)
-                                                                </Text>
-                                                            </Flex>
-                                                            <Text size="1" weight="medium" style={{ color: '#ef4444' }}>
-                                                                -${deduction.amount.toFixed(2)}
-                                                            </Text>
-                                                        </Flex>
-                                                    ))}
+                        {calculations.length === 0 ? (
+                            <Box style={{ padding: '40px', textAlign: 'center' }}>
+                                <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                    No calculations yet. Complete some orders to see profit breakdown.
+                                </Text>
+                            </Box>
+                        ) : (
+                            <>
+                                <Heading size="3" mb="3">Recent Order Calculations</Heading>
+                                <ScrollArea style={{ maxHeight: '600px' }}>
+                                    <Flex direction="column" gap="3">
+                                        {calculations.slice(0, 20).map((calc, idx) => (
+                                            <Card key={idx} style={{
+                                                background: 'rgba(255, 255, 255, 0.02)',
+                                                border: '1px solid rgba(255, 255, 255, 0.05)',
+                                                padding: '20px'
+                                            }}>
+                                                <Flex align="center" justify="between" mb="4">
+                                                    <Heading size="3">
+                                                        {calc.order_number}
+                                                    </Heading>
+                                                    <Badge size="2" variant="soft" color="purple">
+                                                        {new Date(calc.order_date).toLocaleDateString()}
+                                                    </Badge>
                                                 </Flex>
-                                            </Box>
-                                        )}
-                                    </Card>
-                                ))}
-                            </Flex>
-                        </ScrollArea>
+
+                                                <Grid columns={isMobile ? '2' : '4'} gap="3" mb="4">
+                                                    <Box>
+                                                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Order Total</Text>
+                                                        <Text size="3" weight="bold">${calc.total_usdt.toFixed(2)}</Text>
+                                                    </Box>
+                                                    <Box>
+                                                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Base Profit</Text>
+                                                        <Text size="3" weight="bold" style={{ color: '#8b5cf6' }}>
+                                                            ${calc.base_profit.toFixed(2)}
+                                                        </Text>
+                                                    </Box>
+                                                    <Box>
+                                                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Total Deductions</Text>
+                                                        <Text size="3" weight="bold" style={{ color: '#ef4444' }}>
+                                                            -${calc.deductions.reduce((sum, d) => sum + d.amount, 0).toFixed(2)}
+                                                        </Text>
+                                                    </Box>
+                                                    <Box>
+                                                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Final Profit</Text>
+                                                        <Text size="3" weight="bold" style={{ 
+                                                            color: calc.final_profit >= 0 ? '#10b981' : '#ef4444' 
+                                                        }}>
+                                                            ${calc.final_profit.toFixed(2)}
+                                                        </Text>
+                                                    </Box>
+                                                </Grid>
+
+                                                {calc.deductions.length > 0 && (
+                                                    <Box>
+                                                        <Text size="2" weight="medium" style={{ 
+                                                            color: 'rgba(255, 255, 255, 0.7)', 
+                                                            marginBottom: '12px',
+                                                            display: 'block'
+                                                        }}>
+                                                            Deductions:
+                                                        </Text>
+                                                        <Flex direction="column" gap="2">
+                                                            {calc.deductions.map((deduction, dIdx) => (
+                                                                <Flex key={dIdx} align="center" justify="between" style={{
+                                                                    padding: '10px 12px',
+                                                                    background: 'rgba(255, 255, 255, 0.03)',
+                                                                    borderRadius: '6px',
+                                                                    border: '1px solid rgba(255, 255, 255, 0.05)'
+                                                                }}>
+                                                                    <Flex align="center" gap="3">
+                                                                        <Badge size="2" color={
+                                                                            deduction.type === 'discount' ? 'orange' :
+                                                                            deduction.type === 'seller_commission' ? 'purple' :
+                                                                            deduction.type === 'partner_commission' ? 'green' : 'gray'
+                                                                        }>
+                                                                            {deduction.type === 'discount' ? 'Discount' :
+                                                                             deduction.type === 'seller_commission' ? 'Seller' :
+                                                                             deduction.type === 'partner_commission' ? 'Partner' : 'Other'}
+                                                                        </Badge>
+                                                                        <Text size="2" weight="medium">{deduction.name}</Text>
+                                                                        {deduction.rate > 0 && (
+                                                                            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                                                                ({deduction.rate}%)
+                                                                            </Text>
+                                                                        )}
+                                                                    </Flex>
+                                                                    <Text size="3" weight="bold" style={{ color: '#ef4444' }}>
+                                                                        -${deduction.amount.toFixed(2)}
+                                                                    </Text>
+                                                                </Flex>
+                                                            ))}
+                                                        </Flex>
+                                                    </Box>
+                                                )}
+                                            </Card>
+                                        ))}
+                                    </Flex>
+                                </ScrollArea>
+                            </>
+                        )}
                     </Card>
                 </Tabs.Content>
             </Tabs.Root>
 
             {/* Modals */}
-            <PartnerFormModal
-                partner={selectedPartner}
-                isOpen={partnerModalOpen}
-                onClose={() => {
-                    setPartnerModalOpen(false);
-                    setSelectedPartner(null);
-                }}
-                onSave={handleSavePartner}
-            />
+            {partnerModalOpen && (
+                <PartnerFormModal
+                    partner={selectedPartner}
+                    isOpen={partnerModalOpen}
+                    onClose={() => {
+                        setPartnerModalOpen(false);
+                        setSelectedPartner(null);
+                    }}
+                    onSave={handleSavePartner}
+                />
+            )}
 
-            <ExpenseFormModal
-                isOpen={expenseModalOpen}
-                onClose={() => setExpenseModalOpen(false)}
-                onSave={handleSaveExpense}
-            />
+            {expenseModalOpen && (
+                <ExpenseFormModal
+                    isOpen={expenseModalOpen}
+                    onClose={() => setExpenseModalOpen(false)}
+                    onSave={handleSaveExpense}
+                />
+            )}
+
+            {payoutProcessOpen && selectedPayoutPartner && (
+                <PayoutProcess
+                    isOpen={payoutProcessOpen}
+                    partner={selectedPayoutPartner}
+                    onClose={() => {
+                        setPayoutProcessOpen(false);
+                        setSelectedPayoutPartner(null);
+                    }}
+                    onProcess={handleProcessPayout}
+                />
+            )}
+
+            {historyModalOpen && (
+                <PayoutHistoryModal
+                    isOpen={historyModalOpen}
+                    partner={selectedHistoryPartner}
+                    onClose={() => {
+                        setHistoryModalOpen(false);
+                        setSelectedHistoryPartner(null);
+                    }}
+                    payoutsAPI={payoutsAPI}
+                />
+            )}
         </Box>
     );
 };
