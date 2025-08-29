@@ -21,6 +21,7 @@ import PayoutProcess from './PayoutProcess';
 import PartnerFormModal from '../components/payouts/PartnerFormModal';
 import ExpenseFormModal from '../components/payouts/ExpenseFormModal';
 import PayoutHistoryModal from '../components/payouts/PayoutHistoryModal';
+import CalcTable from '../components/payouts/CalcTable';
 
 const StatsCard = ({ title, value, change, icon: Icon, color, prefix = '', suffix = '' }) => {
     const isMobile = window.innerWidth < 768;
@@ -651,272 +652,74 @@ const Payouts = () => {
                             Detailed calculation of profits and commissions
                         </Text>
 
-                        <Grid columns={isMobile ? '1' : '3'} gap="4" mb="4">
+                        <Grid columns={isMobile ? '1' : '3'} gap="4" mb="5">
                             <Card style={{
-                                background: 'rgba(139, 92, 246, 0.1)',
-                                border: '1px solid rgba(139, 92, 246, 0.2)',
-                                padding: '16px'
+                                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0.05) 100%)',
+                                border: '1px solid rgba(139, 92, 246, 0.3)',
+                                padding: '20px'
                             }}>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px' }}>
+                                <Text size="2" style={{ 
+                                    color: 'rgba(255, 255, 255, 0.7)', 
+                                    marginBottom: '12px',
+                                    display: 'block',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px',
+                                    fontSize: '11px'
+                                }}>
                                     Total Orders Analyzed
                                 </Text>
-                                <Text size="5" weight="bold">
+                                <Text size="7" weight="bold" style={{ color: '#fff' }}>
                                     {calculations.length}
                                 </Text>
                             </Card>
                             <Card style={{
-                                background: 'rgba(16, 185, 129, 0.1)',
-                                border: '1px solid rgba(16, 185, 129, 0.2)',
-                                padding: '16px'
+                                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%)',
+                                border: '1px solid rgba(16, 185, 129, 0.3)',
+                                padding: '20px'
                             }}>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px' }}>
+                                <Text size="2" style={{ 
+                                    color: 'rgba(255, 255, 255, 0.7)', 
+                                    marginBottom: '12px',
+                                    display: 'block',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px',
+                                    fontSize: '11px'
+                                }}>
                                     Total Gross Profit
                                 </Text>
-                                <Text size="5" weight="bold" style={{ color: '#10b981' }}>
+                                <Text size="7" weight="bold" style={{ color: '#10b981' }}>
                                     ${calculations.reduce((sum, c) => sum + c.base_profit, 0).toFixed(2)}
                                 </Text>
                             </Card>
                             <Card style={{
-                                background: 'rgba(245, 158, 11, 0.1)',
-                                border: '1px solid rgba(245, 158, 11, 0.2)',
-                                padding: '16px'
+                                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%)',
+                                border: '1px solid rgba(245, 158, 11, 0.3)',
+                                padding: '20px'
                             }}>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px' }}>
+                                <Text size="2" style={{ 
+                                    color: 'rgba(255, 255, 255, 0.7)', 
+                                    marginBottom: '12px',
+                                    display: 'block',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px',
+                                    fontSize: '11px'
+                                }}>
                                     Total Net Profit
                                 </Text>
-                                <Text size="5" weight="bold" style={{ color: '#f59e0b' }}>
+                                <Text size="7" weight="bold" style={{ color: '#f59e0b' }}>
                                     ${calculations.reduce((sum, c) => sum + c.final_profit, 0).toFixed(2)}
                                 </Text>
                             </Card>
                         </Grid>
 
                         {calculations.length === 0 ? (
-                            <Box style={{ padding: '40px', textAlign: 'center' }}>
+                            <Box style={{ padding: '60px', textAlign: 'center' }}>
                                 <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
                                     No calculations yet. Complete some orders to see profit breakdown.
                                 </Text>
                             </Box>
                         ) : (
-                            <>
-                                <Heading size="3" mb="3">Detailed Order Calculations</Heading>
-                                <ScrollArea style={{ maxHeight: '800px' }}>
-                                    <Flex direction="column" gap="4">
-                                        {calculations.slice(0, 20).map((calc, idx) => {
-                                            const originalPrice = calc.total_usdt + (calc.deductions.find(d => d.type === 'discount')?.amount || 0);
-                                            const purchaseCost = originalPrice - calc.base_profit;
-                                            let runningProfit = calc.base_profit;
-                                            
-                                            return (
-                                                <Card key={idx} style={{
-                                                    background: 'rgba(30, 30, 35, 0.8)',
-                                                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                                                    padding: '24px'
-                                                }}>
-                                                    <Flex align="center" justify="between" mb="4">
-                                                        <Heading size="5">{calc.order_number}</Heading>
-                                                        <Badge size="2" variant="soft">
-                                                            {new Date(calc.order_date).toLocaleDateString()}
-                                                        </Badge>
-                                                    </Flex>
-
-                                                    <Table.Root variant="surface" style={{ marginBottom: '20px' }}>
-                                                        <Table.Header>
-                                                            <Table.Row>
-                                                                <Table.ColumnHeaderCell>Description</Table.ColumnHeaderCell>
-                                                                <Table.ColumnHeaderCell>Calculation</Table.ColumnHeaderCell>
-                                                                <Table.ColumnHeaderCell align="right">Amount</Table.ColumnHeaderCell>
-                                                                <Table.ColumnHeaderCell align="right">Running Total</Table.ColumnHeaderCell>
-                                                            </Table.Row>
-                                                        </Table.Header>
-                                                        <Table.Body>
-                                                            <Table.Row>
-                                                                <Table.Cell>
-                                                                    <Flex align="center" gap="2">
-                                                                        <Badge color="gray">Revenue</Badge>
-                                                                        <Text weight="medium">Original Price</Text>
-                                                                    </Flex>
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    <Text size="2" style={{ fontFamily: 'monospace' }}>
-                                                                        Before any discount
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="3" weight="bold">
-                                                                        ${originalPrice.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="3" weight="bold">
-                                                                        ${originalPrice.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                            </Table.Row>
-
-                                                            <Table.Row>
-                                                                <Table.Cell>
-                                                                    <Flex align="center" gap="2">
-                                                                        <Badge color="blue">Cost</Badge>
-                                                                        <Text weight="medium">Purchase Cost</Text>
-                                                                    </Flex>
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    <Text size="2" style={{ fontFamily: 'monospace' }}>
-                                                                        Total cost of goods
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="3" weight="bold" style={{ color: '#ef4444' }}>
-                                                                        -${purchaseCost.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="3" weight="bold">
-                                                                        ${calc.base_profit.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                            </Table.Row>
-
-                                                            <Table.Row style={{ background: 'rgba(16, 185, 129, 0.05)' }}>
-                                                                <Table.Cell>
-                                                                    <Flex align="center" gap="2">
-                                                                        <Badge color="green">Profit</Badge>
-                                                                        <Text weight="bold">Base Profit</Text>
-                                                                    </Flex>
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    <Text size="2" style={{ fontFamily: 'monospace' }}>
-                                                                        ${originalPrice.toFixed(2)} - ${purchaseCost.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="3" weight="bold" style={{ color: '#10b981' }}>
-                                                                        ${calc.base_profit.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="3" weight="bold" style={{ color: '#10b981' }}>
-                                                                        ${calc.base_profit.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                            </Table.Row>
-
-                                                            {calc.deductions.length > 0 && (
-                                                                <>
-                                                                    <Table.Row>
-                                                                        <Table.Cell colSpan={4}>
-                                                                            <Separator size="4" style={{ margin: '8px 0' }} />
-                                                                            <Text size="2" weight="bold" style={{ 
-                                                                                color: 'rgba(255, 255, 255, 0.7)',
-                                                                                textTransform: 'uppercase',
-                                                                                letterSpacing: '0.5px'
-                                                                            }}>
-                                                                                Profit Deductions
-                                                                            </Text>
-                                                                        </Table.Cell>
-                                                                    </Table.Row>
-
-                                                                    {calc.deductions.map((deduction, dIdx) => {
-                                                                        runningProfit -= deduction.amount;
-                                                                        return (
-                                                                            <Table.Row key={dIdx}>
-                                                                                <Table.Cell>
-                                                                                    <Flex align="center" gap="2">
-                                                                                        <Badge color={
-                                                                                            deduction.type === 'discount' ? 'orange' :
-                                                                                            deduction.type === 'seller_commission' ? 'purple' : 'green'
-                                                                                        }>
-                                                                                            {deduction.type === 'discount' ? 'Discount' :
-                                                                                             deduction.type === 'seller_commission' ? 'Seller' :
-                                                                                             deduction.type === 'partner_commission' ? 'Partner' : 'Other'}
-                                                                                        </Badge>
-                                                                                        <Text weight="medium">{deduction.name}</Text>
-                                                                                    </Flex>
-                                                                                </Table.Cell>
-                                                                                <Table.Cell>
-                                                                                    <Text size="2" style={{ fontFamily: 'monospace' }}>
-                                                                                        {deduction.rate > 0 ? `${deduction.rate}% of profit` : 'Fixed discount'}
-                                                                                    </Text>
-                                                                                </Table.Cell>
-                                                                                <Table.Cell align="right">
-                                                                                    <Text size="3" weight="bold" style={{ 
-                                                                                        color: deduction.type === 'discount' ? '#f59e0b' :
-                                                                                               deduction.type === 'seller_commission' ? '#8b5cf6' : '#10b981'
-                                                                                    }}>
-                                                                                        -${deduction.amount.toFixed(2)}
-                                                                                    </Text>
-                                                                                </Table.Cell>
-                                                                                <Table.Cell align="right">
-                                                                                    <Text size="3" weight="bold">
-                                                                                        ${runningProfit.toFixed(2)}
-                                                                                    </Text>
-                                                                                </Table.Cell>
-                                                                            </Table.Row>
-                                                                        );
-                                                                    })}
-                                                                </>
-                                                            )}
-
-                                                            <Table.Row style={{ 
-                                                                background: calc.final_profit >= 0 
-                                                                    ? 'rgba(16, 185, 129, 0.1)' 
-                                                                    : 'rgba(239, 68, 68, 0.1)',
-                                                                borderTop: '2px solid rgba(255, 255, 255, 0.2)'
-                                                            }}>
-                                                                <Table.Cell>
-                                                                    <Flex align="center" gap="2">
-                                                                        <Badge color={calc.final_profit >= 0 ? 'green' : 'red'} size="2">
-                                                                            FINAL
-                                                                        </Badge>
-                                                                        <Text weight="bold" size="3">Net Profit</Text>
-                                                                    </Flex>
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    <Text size="2" style={{ fontFamily: 'monospace' }}>
-                                                                        After all deductions
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="4" weight="bold" style={{ 
-                                                                        color: calc.final_profit >= 0 ? '#10b981' : '#ef4444' 
-                                                                    }}>
-                                                                        ${calc.final_profit.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                                <Table.Cell align="right">
-                                                                    <Text size="4" weight="bold" style={{ 
-                                                                        color: calc.final_profit >= 0 ? '#10b981' : '#ef4444' 
-                                                                    }}>
-                                                                        ${calc.final_profit.toFixed(2)}
-                                                                    </Text>
-                                                                </Table.Cell>
-                                                            </Table.Row>
-
-                                                            <Table.Row>
-                                                                <Table.Cell colSpan={4}>
-                                                                    <Card style={{
-                                                                        background: 'rgba(139, 92, 246, 0.05)',
-                                                                        border: '1px solid rgba(139, 92, 246, 0.2)',
-                                                                        padding: '12px',
-                                                                        marginTop: '12px'
-                                                                    }}>
-                                                                        <Text size="2" weight="bold" style={{ color: '#8b5cf6', marginBottom: '8px', display: 'block' }}>
-                                                                            Customer Paid: ${calc.total_usdt.toFixed(2)} | Your Profit: ${calc.final_profit.toFixed(2)}
-                                                                        </Text>
-                                                                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                                                                            Profit Margin: {((calc.final_profit / calc.total_usdt) * 100).toFixed(1)}%
-                                                                        </Text>
-                                                                    </Card>
-                                                                </Table.Cell>
-                                                            </Table.Row>
-                                                        </Table.Body>
-                                                    </Table.Root>
-                                                </Card>
-                                            );
-                                        })}
-                                    </Flex>
-                                </ScrollArea>
-                            </>
+                            <CalcTable calculations={calculations} />
                         )}
                     </Card>
                 </Tabs.Content>
