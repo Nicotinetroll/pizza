@@ -25,6 +25,7 @@ import Notifications from './pages/Notifications';
 import Chat from './pages/Chat';
 import BotSettings from './pages/BotSettings';
 import CustomerRequests from './pages/CustomerRequests';
+import Payouts from './pages/Payouts';
 
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, color: '#8b5cf6', mobileShow: true },
@@ -32,6 +33,7 @@ const navigationItems = [
   { id: 'categories', label: 'Categories', icon: LayersIcon, color: '#06b6d4', mobileShow: true },
   { id: 'products', label: 'Products', icon: CubeIcon, color: '#10b981', mobileShow: true },
   { id: 'referrals', label: 'Referrals', icon: StarIcon, color: '#f59e0b', mobileShow: false },
+  { id: 'payouts', label: 'Payouts', icon: BarChartIcon, color: '#10b981', mobileShow: false },
   { id: 'sellers', label: 'Sellers', icon: IdCardIcon, color: '#14b8a6', mobileShow: false },
   { id: 'users', label: 'Users', icon: PersonIcon, color: '#6366f1', mobileShow: false },
   { id: 'chat', label: 'Chat', icon: ChatBubbleIcon, color: '#ec4899', mobileShow: false },
@@ -171,8 +173,8 @@ const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages, unreadReques
                     {moreItems.map((item) => {
                       const Icon = item.icon;
                       const isActive = activeTab === item.id;
-                      const hasUnread = (item.id === 'chat' && unreadMessages > 0) || 
-                                       (item.id === 'requests' && unreadRequests > 0);
+                      const hasUnread = (item.id === 'chat' && unreadMessages > 0) ||
+                          (item.id === 'requests' && unreadRequests > 0);
 
                       return (
                           <Button
@@ -406,6 +408,7 @@ const MainApp = () => {
       categories: Categories,
       products: Products,
       referrals: Referrals,
+      payouts: Payouts,
       sellers: Sellers,
       users: Users,
       chat: Chat,
@@ -686,16 +689,16 @@ const MainApp = () => {
                                       }}
                                   />
                               )}
-                              <Flex 
-                                align="center" 
-                                gap="3" 
-                                style={{ 
-                                  width: '100%',
-                                  height: '100%',
-                                  alignItems: 'center'
-                                }}
+                              <Flex
+                                  align="center"
+                                  gap="3"
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    alignItems: 'center'
+                                  }}
                               >
-                                <Box style={{ 
+                                <Box style={{
                                   position: 'relative',
                                   display: 'flex',
                                   alignItems: 'center',
@@ -720,14 +723,14 @@ const MainApp = () => {
                                       />
                                   )}
                                 </Box>
-                                <Flex 
-                                  align="center" 
-                                  justify="between" 
-                                  style={{ 
-                                    flex: 1,
-                                    height: '100%',
-                                    alignItems: 'center'
-                                  }}
+                                <Flex
+                                    align="center"
+                                    justify="between"
+                                    style={{
+                                      flex: 1,
+                                      height: '100%',
+                                      alignItems: 'center'
+                                    }}
                                 >
                                   <Text size="2" weight={isActive ? 'medium' : 'regular'}>
                                     {item.label}

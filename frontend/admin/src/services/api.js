@@ -828,4 +828,101 @@ export const botAPI = {
   }
 };
 
+export const payoutsAPI = {
+  // Partners
+  getPartners: async () => {
+    const response = await api.get('/payouts/partners');
+    return response.data;
+  },
+
+  createPartner: async (partner) => {
+    if (!partner.name) {
+      throw new Error('Partner name is required');
+    }
+
+    if (partner.type === 'partner' && (!partner.commission_percentage || partner.commission_percentage <= 0)) {
+      throw new Error('Valid commission percentage required for partners');
+    }
+
+    if (partner.type === 'service' && (!partner.fixed_amount || partner.fixed_amount <= 0)) {
+      throw new Error('Valid fixed amount required for services');
+    }
+
+    const response = await api.post('/payouts/partners', partner);
+    return response.data;
+  },
+
+  updatePartner: async (partnerId, partner) => {
+    if (!partnerId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid partner ID');
+    }
+
+    const response = await api.put(`/payouts/partners/${partnerId}`, partner);
+    return response.data;
+  },
+
+  deletePartner: async (partnerId) => {
+    if (!partnerId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid partner ID');
+    }
+
+    const response = await api.delete(`/payouts/partners/${partnerId}`);
+    return response.data;
+  },
+
+  // Expenses
+  getExpenses: async (status = null) => {
+    const params = status ? { status } : {};
+    const response = await api.get('/payouts/expenses', { params });
+    return response.data;
+  },
+
+  createExpense: async (expense) => {
+    if (!expense.name || expense.amount <= 0) {
+      throw new Error('Valid expense name and amount required');
+    }
+
+    const response = await api.post('/payouts/expenses', expense);
+    return response.data;
+  },
+
+  payExpense: async (expenseId) => {
+    if (!expenseId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid expense ID');
+    }
+
+    const response = await api.patch(`/payouts/expenses/${expenseId}/pay`);
+    return response.data;
+  },
+
+  // Calculations
+  getCalculations: async () => {
+    const response = await api.get('/payouts/calculations');
+    return response.data;
+  },
+
+  // Process Payout
+  processPayout: async (transaction) => {
+    if (!transaction.partner_id || !transaction.amount || transaction.amount <= 0) {
+      throw new Error('Valid partner ID and amount required');
+    }
+
+    const response = await api.post('/payouts/process', transaction);
+    return response.data;
+  },
+
+  // History
+  getHistory: async (partnerId = null) => {
+    const params = partnerId ? { partner_id: partnerId } : {};
+    const response = await api.get('/payouts/history', { params });
+    return response.data;
+  },
+
+  // Stats
+  getStats: async () => {
+    const response = await api.get('/payouts/stats');
+    return response.data;
+  }
+};
+
 export default api;

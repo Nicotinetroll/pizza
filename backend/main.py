@@ -13,6 +13,7 @@ from main_modules.endpoints_users_sellers import router_users_sellers
 from main_modules.endpoints_system import router_system
 from main_modules.endpoints_chat_admin import router_chat_admin
 from main_modules.helpers import setup_chat_indexes
+from main_modules import endpoints_payouts
 
 # Load environment variables
 load_dotenv()
@@ -80,6 +81,7 @@ app.include_router(router_products_orders)
 app.include_router(router_users_sellers)
 app.include_router(router_system)
 app.include_router(router_chat_admin)
+app.include_router(endpoints_payouts.router)
 
 # Include payment router if it exists
 try:
