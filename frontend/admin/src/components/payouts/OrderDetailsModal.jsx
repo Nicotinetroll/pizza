@@ -1,9 +1,7 @@
-// frontend/admin/src/components/payouts/OrderDetailsModal.jsx
-
 import React, { useState } from 'react';
 import {
     Dialog, Box, Flex, Text, Button, Table, Badge, ScrollArea,
-    Heading, IconButton, Separator, Card, Grid
+    Heading, IconButton, Separator, Card, Grid, VisuallyHidden
 } from '@radix-ui/themes';
 import {
     Cross2Icon, BarChartIcon, ArrowRightIcon
@@ -19,12 +17,16 @@ const OrderDetailsModal = ({ isOpen, onClose, calculation }) => {
     return (
         <Dialog.Root open={isOpen} onOpenChange={onClose}>
             <Dialog.Content style={{ maxWidth: '900px', maxHeight: '85vh', padding: '0' }}>
+                <VisuallyHidden>
+                    <Dialog.Title>Order Details</Dialog.Title>
+                    <Dialog.Description>Detailed breakdown of order {calculation.order_number}</Dialog.Description>
+                </VisuallyHidden>
+                
                 <Box style={{
                     background: 'linear-gradient(135deg, #1a1a20 0%, #2a2a35 100%)',
                     borderRadius: '12px',
                     overflow: 'hidden'
                 }}>
-                    {/* Header */}
                     <Flex align="center" justify="between" style={{
                         padding: '24px',
                         borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
@@ -50,7 +52,6 @@ const OrderDetailsModal = ({ isOpen, onClose, calculation }) => {
                         </IconButton>
                     </Flex>
 
-                    {/* Summary Cards */}
                     <Box style={{ padding: '24px' }}>
                         <Grid columns="4" gap="4" style={{ marginBottom: '24px' }}>
                             <Card style={{
@@ -136,7 +137,6 @@ const OrderDetailsModal = ({ isOpen, onClose, calculation }) => {
                             </Card>
                         </Grid>
 
-                        {/* Detailed Calculation Table */}
                         <Card style={{
                             background: 'rgba(255, 255, 255, 0.02)',
                             border: '1px solid rgba(255, 255, 255, 0.1)',
@@ -300,7 +300,6 @@ const OrderDetailsModal = ({ isOpen, onClose, calculation }) => {
                             </ScrollArea>
                         </Card>
 
-                        {/* Footer with profit margin */}
                         <Card style={{
                             background: 'rgba(139, 92, 246, 0.05)',
                             border: '1px solid rgba(139, 92, 246, 0.2)',
