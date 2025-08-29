@@ -227,6 +227,12 @@ async def get_payout_calculations():
         all_products = await db.products.find({}).to_list(None)
         products_by_name = {p["name"]: p for p in all_products}
         
+        # Get recurring per-order expenses
+        recurring_expenses = await db.expenses.find({
+            "apply_per_order": True,
+            "status": {"$ne": "cancelled"}
+        }).to_list(None)
+        
         calculations = []
         total_partner_payouts = {}
         
@@ -265,6 +271,18 @@ async def get_payout_calculations():
             order_calc["base_profit"] = base_profit
             
             current_profit = base_profit
+            
+            # Apply recurring per-order expenses FIRST (before discounts)
+            for expense in recurring_expenses:
+                expense_amount = float(expense.get("amount", 0))
+                if expense_amount > 0:
+                    order_calc["deductions"].append({
+                        "type": "expense",
+                        "name": f"{expense.get('name')} ({expense.get('type', 'expense')})",
+                        "rate": 0,
+                        "amount": expense_amount
+                    })
+                    current_profit -= expense_amount
             
             if discount_amount > 0:
                 order_calc["deductions"].append({
@@ -315,7 +333,7 @@ async def get_payout_calculations():
                     
                     current_profit -= commission
             
-            order_calc["final_profit"] = max(0, current_profit)
+            order_calc["final_profit"] = current_profit  # Can be negative
             calculations.append(order_calc)
         
         return {
