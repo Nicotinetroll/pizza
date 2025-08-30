@@ -522,7 +522,7 @@ export const notificationsAPI = {
         
         if (!response.ok) throw new Error('Failed to toggle media');
         return response.json();
-    }
+    },
 
   addTemplate: async (template) => {
     const response = await api.post('/notifications/templates', template);
@@ -547,7 +547,7 @@ export const notificationsAPI = {
   getLogs: async () => {
     const response = await api.get('/notifications/logs');
     return response.data;
-  }
+  },
 };
 
 export const dashboardAPI = {
