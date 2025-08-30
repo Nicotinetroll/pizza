@@ -371,17 +371,100 @@ export const adminAPI = {
 };
 
 export const notificationsAPI = {
-  getSettings: async () => {
-    const response = await api.get('/notifications/settings');
-    return response.data;
-  },
+    getSettings: async () => {
+        const response = await fetch(`${API_BASE_URL}/notifications/settings`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch settings');
+        return response.json();
+    },
 
-  updateSettings: async (settings) => {
-    const response = await api.put('/notifications/settings', settings);
-    return response.data;
-  },
+    updateSettings: async (settings) => {
+        const response = await fetch(`${API_BASE_URL}/notifications/settings`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        });
+        
+        if (!response.ok) throw new Error('Failed to update settings');
+        return response.json();
+    },
 
-  uploadMedia: async (file, type) => {
+    addTemplate: async (template) => {
+        const response = await fetch(`${API_BASE_URL}/notifications/templates`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(template)
+        });
+        
+        if (!response.ok) throw new Error('Failed to add template');
+        return response.json();
+    },
+
+    deleteTemplate: async (index) => {
+        const response = await fetch(`${API_BASE_URL}/notifications/templates/${index}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to delete template');
+        return response.json();
+    },
+
+    sendTestNotification: async () => {
+        const response = await fetch(`${API_BASE_URL}/notifications/test`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to send test notification');
+        return response.json();
+    },
+
+    sendFakeOrder: async () => {
+        const response = await fetch(`${API_BASE_URL}/notifications/fake-order`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to send fake order');
+        return response.json();
+    },
+
+    getLogs: async () => {
+        const response = await fetch(`${API_BASE_URL}/notifications/logs`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch logs');
+        return response.json();
+    },
+    
+    uploadMedia: async (file, type) => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('type', type);
@@ -428,18 +511,18 @@ export const notificationsAPI = {
         return response.json();
     },
     
-      toggleMedia: async (mediaId) => {
-          const response = await fetch(`${API_BASE_URL}/notifications/media/${mediaId}/toggle`, {
-              method: 'PATCH',
-              headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('token')}`,
-                  'Content-Type': 'application/json'
-              }
-          });
-          
-          if (!response.ok) throw new Error('Failed to toggle media');
-          return response.json();
-      },
+    toggleMedia: async (mediaId) => {
+        const response = await fetch(`${API_BASE_URL}/notifications/media/${mediaId}/toggle`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to toggle media');
+        return response.json();
+    }
 
   addTemplate: async (template) => {
     const response = await api.post('/notifications/templates', template);

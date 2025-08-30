@@ -6,7 +6,7 @@ import {
 } from '@radix-ui/themes';
 import {
     ImageIcon, TrashIcon, UploadIcon, CheckCircledIcon,
-    CrossCircledIcon, EyeOpenIcon, EyeNoneIcon
+    CrossCircledIcon, EyeOpenIcon, EyeNoneIcon, VideoIcon
 } from '@radix-ui/react-icons';
 import { notificationsAPI } from '../services/api';
 
@@ -35,24 +35,25 @@ const NotificationMedia = () => {
     };
 
     const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+        const file = event.target.files[0];
+        if (!file) return;
 
-    // Automaticky detekuj typ súboru
-    const fileExtension = file.name.split('.').pop().toLowerCase();
-    if (fileExtension === 'gif') {
-        setSelectedType('gif');
-    } else {
-        setSelectedType('image');
-    }
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        if (fileExtension === 'gif') {
+            setSelectedType('gif');
+        } else if (fileExtension === 'webm' || fileExtension === 'mp4') {
+            setSelectedType('video');
+        } else {
+            setSelectedType('image');
+        }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-        setPreviewUrl(reader.result);
-        setShowUploadDialog(true);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setPreviewUrl(reader.result);
+            setShowUploadDialog(true);
+        };
+        reader.readAsDataURL(file);
     };
-    reader.readAsDataURL(file);
-};
 
     const handleUpload = async () => {
         const file = fileInputRef.current?.files[0];
@@ -98,6 +99,14 @@ const NotificationMedia = () => {
 
     const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace('/api', '');
 
+    const getMediaBadgeColor = (type) => {
+        switch(type) {
+            case 'gif': return 'purple';
+            case 'video': return 'orange';
+            default: return 'blue';
+        }
+    };
+
     return (
         <Box>
             <Flex align="center" justify="between" mb="6">
@@ -106,7 +115,7 @@ const NotificationMedia = () => {
                         Notification Media
                     </Heading>
                     <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                        Images and GIFs for order notifications
+                        Images, GIFs and Videos for order notifications
                     </Text>
                 </Box>
 
@@ -125,7 +134,7 @@ const NotificationMedia = () => {
                 <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*,.gif"
+                    accept="image/*,.gif,.webm,.mp4"
                     onChange={handleFileSelect}
                     style={{ display: 'none' }}
                 />
@@ -151,18 +160,48 @@ const NotificationMedia = () => {
                                 paddingBottom: '100%',
                                 background: 'rgba(255, 255, 255, 0.03)'
                             }}>
-                                <img
-                                    src={`${BASE_URL}${media.url}`}
-                                    alt={media.original_name}
-                                    style={{
+                                {media.type === 'video' ? (
+                                    <video
+                                        src={`${BASE_URL}${media.url}`}
+                                        style={{
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: 0,
+                                            width: '100%',
+                                            height: '100%',
+                                            objectFit: 'cover'
+                                        }}
+                                        muted
+                                        loop
+                                        playsInline
+                                    />
+                                ) : (
+                                    <img
+                                        src={`${BASE_URL}${media.url}`}
+                                        alt={media.original_name}
+                                        style={{
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: 0,
+                                            width: '100%',
+                                            height: '100%',
+                                            objectFit: 'cover'
+                                        }}
+                                    />
+                                )}
+                                
+                                {media.type === 'video' && (
+                                    <Box style={{
                                         position: 'absolute',
-                                        top: 0,
-                                        left: 0,
-                                        width: '100%',
-                                        height: '100%',
-                                        objectFit: 'cover'
-                                    }}
-                                />
+                                        top: '8px',
+                                        right: '8px',
+                                        background: 'rgba(0, 0, 0, 0.7)',
+                                        borderRadius: '4px',
+                                        padding: '4px 8px'
+                                    }}>
+                                        <VideoIcon width="16" height="16" style={{ color: 'white' }} />
+                                    </Box>
+                                )}
                                 
                                 {!media.enabled && (
                                     <Box style={{
@@ -183,7 +222,7 @@ const NotificationMedia = () => {
 
                             <Box style={{ padding: '12px' }}>
                                 <Flex align="center" justify="between" mb="2">
-                                    <Badge color={media.type === 'gif' ? 'purple' : 'blue'}>
+                                    <Badge color={getMediaBadgeColor(media.type)}>
                                         {media.type.toUpperCase()}
                                     </Badge>
                                     
@@ -226,7 +265,7 @@ const NotificationMedia = () => {
             <Dialog.Root open={showUploadDialog} onOpenChange={setShowUploadDialog}>
                 <Dialog.Content style={{ maxWidth: 500 }}>
                     <Dialog.Title>Upload Media</Dialog.Title>
-                    <Dialog.Description>Choose an image or GIF for notifications</Dialog.Description>
+                    <Dialog.Description>Choose an image, GIF or video for notifications</Dialog.Description>
                     
                     {previewUrl && (
                         <Box mb="4" style={{
@@ -234,20 +273,32 @@ const NotificationMedia = () => {
                             borderRadius: '8px',
                             padding: '16px'
                         }}>
-                            <img
-                                src={previewUrl}
-                                alt="Preview"
-                                style={{
-                                    width: '100%',
-                                    maxHeight: '300px',
-                                    objectFit: 'contain',
-                                    borderRadius: '4px'
-                                }}
-                            />
+                            {selectedType === 'video' ? (
+                                <video
+                                    src={previewUrl}
+                                    controls
+                                    style={{
+                                        width: '100%',
+                                        maxHeight: '300px',
+                                        borderRadius: '4px'
+                                    }}
+                                />
+                            ) : (
+                                <img
+                                    src={previewUrl}
+                                    alt="Preview"
+                                    style={{
+                                        width: '100%',
+                                        maxHeight: '300px',
+                                        objectFit: 'contain',
+                                        borderRadius: '4px'
+                                    }}
+                                />
+                            )}
                         </Box>
                     )}
 
-                    <Flex gap="3" mb="4">
+                    <Flex gap="2" mb="4">
                         <Button
                             size="3"
                             variant={selectedType === 'image' ? 'solid' : 'soft'}
@@ -261,6 +312,13 @@ const NotificationMedia = () => {
                             onClick={() => setSelectedType('gif')}
                         >
                             GIF
+                        </Button>
+                        <Button
+                            size="3"
+                            variant={selectedType === 'video' ? 'solid' : 'soft'}
+                            onClick={() => setSelectedType('video')}
+                        >
+                            Video
                         </Button>
                     </Flex>
 
@@ -298,7 +356,7 @@ const NotificationMedia = () => {
                         }}
                     />
                     <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                        No media uploaded yet. Upload images or GIFs to use in notifications.
+                        No media uploaded yet. Upload images, GIFs or videos to use in notifications.
                     </Text>
                 </Card>
             )}

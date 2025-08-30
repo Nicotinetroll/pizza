@@ -27,7 +27,8 @@ async def upload_notification_media(
     try:
         allowed_extensions = {
             'image': ['.jpg', '.jpeg', '.png', '.webp'],
-            'gif': ['.gif']
+            'gif': ['.gif'],
+            'video': ['.webm', '.mp4']
         }
         
         file_ext = Path(file.filename).suffix.lower()
@@ -37,6 +38,9 @@ async def upload_notification_media(
         
         if type == 'gif' and file_ext not in allowed_extensions['gif']:
             raise HTTPException(status_code=400, detail="Invalid GIF format")
+        
+        if type == 'video' and file_ext not in allowed_extensions['video']:
+            raise HTTPException(status_code=400, detail="Invalid video format. Use WEBM or MP4")
         
         unique_id = secrets.token_hex(8)
         new_filename = f"{unique_id}{file_ext}"
