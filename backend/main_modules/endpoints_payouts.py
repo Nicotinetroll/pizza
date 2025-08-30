@@ -26,6 +26,8 @@ class Expense(BaseModel):
     name: str
     type: str
     amount: float
+    percentage: Optional[float] = None
+    amount_type: Optional[str] = "fixed"
     order_id: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[datetime] = None
@@ -167,7 +169,7 @@ async def get_expenses(status: Optional[str] = None):
             if expense.get("order_id"):
                 expense["order_id"] = str(expense["order_id"])
         
-        total_pending = sum(e["amount"] for e in expenses if e["status"] == "pending")
+        total_pending = sum(e["amount"] for e in expenses if e["status"] == "pending" and not e.get("apply_per_order"))
         total_paid = sum(e["amount"] for e in expenses if e["status"] == "paid")
         
         return {
@@ -187,9 +189,65 @@ async def create_expense(expense: Expense):
         if expense.order_id:
             expense_dict["order_id"] = ObjectId(expense.order_id)
         
+        if expense.apply_per_order and expense.amount_type == "percentage":
+            if not expense.percentage or expense.percentage <= 0 or expense.percentage > 100:
+                raise HTTPException(status_code=400, detail="Percentage must be between 0 and 100")
+        
         result = await db.expenses.insert_one(expense_dict)
         
         return {"success": True, "id": str(result.inserted_id)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/expenses/{expense_id}")
+async def update_expense(expense_id: str, expense: dict):
+    """Update an expense"""
+    try:
+        if not ObjectId.is_valid(expense_id):
+            raise HTTPException(status_code=400, detail="Invalid expense ID")
+        
+        if '_id' in expense:
+            del expense['_id']
+        
+        if expense.get('order_id'):
+            expense['order_id'] = ObjectId(expense['order_id'])
+        
+        if expense.get('apply_per_order') and expense.get('amount_type') == 'percentage':
+            if not expense.get('percentage') or expense['percentage'] <= 0 or expense['percentage'] > 100:
+                raise HTTPException(status_code=400, detail="Percentage must be between 0 and 100")
+        
+        result = await db.expenses.update_one(
+            {"_id": ObjectId(expense_id)},
+            {"$set": {
+                **expense,
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Expense not found")
+        
+        return {"success": True, "message": "Expense updated successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/expenses/{expense_id}")
+async def delete_expense(expense_id: str):
+    """Delete an expense"""
+    try:
+        if not ObjectId.is_valid(expense_id):
+            raise HTTPException(status_code=400, detail="Invalid expense ID")
+        
+        result = await db.expenses.delete_one(
+            {"_id": ObjectId(expense_id)}
+        )
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Expense not found")
+        
+        return {"success": True, "message": "Expense deleted successfully"}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -227,7 +285,6 @@ async def get_payout_calculations():
         all_products = await db.products.find({}).to_list(None)
         products_by_name = {p["name"]: p for p in all_products}
         
-        # Get recurring per-order expenses
         recurring_expenses = await db.expenses.find({
             "apply_per_order": True,
             "status": {"$ne": "cancelled"}
@@ -272,14 +329,23 @@ async def get_payout_calculations():
             
             current_profit = base_profit
             
-            # Apply recurring per-order expenses FIRST (before discounts)
             for expense in recurring_expenses:
-                expense_amount = float(expense.get("amount", 0))
+                expense_amount = 0
+                expense_name = expense.get('name')
+                
+                if expense.get('amount_type') == 'percentage' and expense.get('percentage'):
+                    percentage = float(expense.get('percentage', 0))
+                    if percentage > 0 and current_profit > 0:
+                        expense_amount = current_profit * (percentage / 100)
+                        expense_name = f"{expense.get('name')} ({percentage}%)"
+                else:
+                    expense_amount = float(expense.get('amount', 0))
+                
                 if expense_amount > 0:
                     order_calc["deductions"].append({
                         "type": "expense",
-                        "name": f"{expense.get('name')} ({expense.get('type', 'expense')})",
-                        "rate": 0,
+                        "name": f"{expense_name} ({expense.get('type', 'expense')})",
+                        "rate": expense.get('percentage', 0) if expense.get('amount_type') == 'percentage' else 0,
                         "amount": expense_amount
                     })
                     current_profit -= expense_amount
@@ -333,7 +399,7 @@ async def get_payout_calculations():
                     
                     current_profit -= commission
             
-            order_calc["final_profit"] = current_profit  # Can be negative
+            order_calc["final_profit"] = current_profit
             calculations.append(order_calc)
         
         return {
@@ -437,7 +503,7 @@ async def get_payout_stats():
         ]).to_list(1)
         
         pending_expenses = await db.expenses.aggregate([
-            {"$match": {"status": "pending"}},
+            {"$match": {"status": "pending", "apply_per_order": {"$ne": True}}},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ]).to_list(1)
         

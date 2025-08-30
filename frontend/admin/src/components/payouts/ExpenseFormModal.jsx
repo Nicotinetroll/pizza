@@ -1,9 +1,7 @@
-// frontend/admin/src/components/payouts/ExpenseFormModal.jsx
-
 import React, { useState, useEffect } from 'react';
 import {
     Dialog, Box, Flex, Text, Button, TextField, TextArea,
-    Select, Grid, Card, Badge, Switch
+    Select, Grid, Card, Badge, Switch, RadioGroup, Radio
 } from '@radix-ui/themes';
 import {
     FileTextIcon, PlusIcon, CheckIcon, CrossCircledIcon,
@@ -15,6 +13,8 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
         name: '',
         type: 'shipping',
         amount: 0,
+        percentage: 0,
+        amount_type: 'fixed',
         description: '',
         due_date: '',
         order_id: '',
@@ -29,13 +29,18 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
             setFormData({
                 ...expense,
                 due_date: expense.due_date ? new Date(expense.due_date).toISOString().split('T')[0] : '',
-                apply_per_order: expense.apply_per_order || false
+                order_id: expense.order_id || '',
+                apply_per_order: expense.apply_per_order || false,
+                amount_type: expense.percentage ? 'percentage' : 'fixed',
+                percentage: expense.percentage || 0
             });
         } else {
             setFormData({
                 name: '',
                 type: 'shipping',
                 amount: 0,
+                percentage: 0,
+                amount_type: 'fixed',
                 description: '',
                 due_date: '',
                 order_id: '',
@@ -49,7 +54,16 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
     const validate = () => {
         const newErrors = {};
         if (!formData.name.trim()) newErrors.name = 'Expense name is required';
-        if (!formData.amount || formData.amount <= 0) newErrors.amount = 'Amount must be greater than 0';
+        
+        if (formData.apply_per_order && formData.amount_type === 'percentage') {
+            if (!formData.percentage || formData.percentage <= 0 || formData.percentage > 100) {
+                newErrors.percentage = 'Percentage must be between 0 and 100';
+            }
+        } else {
+            if (!formData.amount || formData.amount <= 0) {
+                newErrors.amount = 'Amount must be greater than 0';
+            }
+        }
         
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -60,12 +74,18 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
         
         setSaving(true);
         
-        // Clean up the data before sending
         const submitData = {
             ...formData,
             due_date: formData.due_date || null,
             order_id: formData.order_id || null
         };
+        
+        if (formData.apply_per_order && formData.amount_type === 'percentage') {
+            submitData.amount = 0;
+            submitData.percentage = formData.percentage;
+        } else {
+            submitData.percentage = 0;
+        }
         
         await onSave(submitData, expense?._id);
         setSaving(false);
@@ -111,7 +131,6 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
 
                 <Box mt="5">
                     <Flex direction="column" gap="4">
-                        {/* Expense Name */}
                         <Box>
                             <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
                                 Expense Name *
@@ -133,7 +152,6 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
                             )}
                         </Box>
 
-                        {/* Type and Amount */}
                         <Grid columns="2" gap="4">
                             <Box>
                                 <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
@@ -191,43 +209,64 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
 
                             <Box>
                                 <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
-                                    Amount (USDT) *
+                                    {formData.apply_per_order && formData.amount_type === 'percentage' ? 'Percentage (%)' : 'Amount (USDT)'} *
                                 </Text>
-                                <TextField.Root
-                                    size="3"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    placeholder="0.00"
-                                    value={formData.amount}
-                                    onChange={(e) => setFormData({...formData, amount: parseFloat(e.target.value) || 0})}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.05)',
-                                        border: errors.amount ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)'
-                                    }}
-                                />
+                                {formData.apply_per_order && formData.amount_type === 'percentage' ? (
+                                    <TextField.Root
+                                        size="3"
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.1"
+                                        placeholder="0.0"
+                                        value={formData.percentage}
+                                        onChange={(e) => setFormData({...formData, percentage: parseFloat(e.target.value) || 0})}
+                                        style={{
+                                            background: 'rgba(255, 255, 255, 0.05)',
+                                            border: errors.percentage ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)'
+                                        }}
+                                    />
+                                ) : (
+                                    <TextField.Root
+                                        size="3"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0.00"
+                                        value={formData.amount}
+                                        onChange={(e) => setFormData({...formData, amount: parseFloat(e.target.value) || 0})}
+                                        style={{
+                                            background: 'rgba(255, 255, 255, 0.05)',
+                                            border: errors.amount ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)'
+                                        }}
+                                    />
+                                )}
                                 {errors.amount && (
                                     <Text size="1" style={{ color: '#ef4444', marginTop: '4px' }}>
                                         {errors.amount}
                                     </Text>
                                 )}
+                                {errors.percentage && (
+                                    <Text size="1" style={{ color: '#ef4444', marginTop: '4px' }}>
+                                        {errors.percentage}
+                                    </Text>
+                                )}
                             </Box>
                         </Grid>
 
-                        {/* Recurring/Per Order Options */}
                         <Card style={{
                             background: 'rgba(245, 158, 11, 0.05)',
                             border: '1px solid rgba(245, 158, 11, 0.2)',
-                            padding: '16px'
+                            padding: '20px'
                         }}>
-                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '12px' }}>
+                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '16px' }}>
                                 Expense Options
                             </Text>
-                            <Flex direction="column" gap="3">
+                            <Flex direction="column" gap="4">
                                 <Flex align="center" justify="between">
-                                    <Box>
+                                    <Box style={{ maxWidth: '70%' }}>
                                         <Text size="2">Apply per Order</Text>
-                                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', marginTop: '4px' }}>
+                                        <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', marginTop: '4px', display: 'block' }}>
                                             Automatically deduct from each order
                                         </Text>
                                     </Box>
@@ -237,24 +276,55 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
                                         onCheckedChange={(checked) => setFormData({...formData, apply_per_order: checked})}
                                     />
                                 </Flex>
+                                
                                 {formData.apply_per_order && (
-                                    <Card style={{
-                                        background: 'rgba(245, 158, 11, 0.1)',
-                                        border: '1px solid rgba(245, 158, 11, 0.3)',
-                                        padding: '12px'
-                                    }}>
-                                        <Flex align="center" gap="2">
-                                            <ExclamationTriangleIcon style={{ color: '#f59e0b' }} />
-                                            <Text size="1" style={{ color: '#f59e0b' }}>
-                                                This amount will be deducted from profit on every order
+                                    <>
+                                        <Box style={{ marginTop: '12px' }}>
+                                            <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '12px' }}>
+                                                Calculation Type
                                             </Text>
-                                        </Flex>
-                                    </Card>
+                                            <RadioGroup.Root
+                                                value={formData.amount_type}
+                                                onValueChange={(value) => setFormData({...formData, amount_type: value})}
+                                            >
+                                                <Flex gap="4">
+                                                    <Flex align="center" gap="2">
+                                                        <RadioGroup.Item value="fixed" id="fixed" />
+                                                        <label htmlFor="fixed">
+                                                            <Text size="2">Fixed Amount</Text>
+                                                        </label>
+                                                    </Flex>
+                                                    <Flex align="center" gap="2">
+                                                        <RadioGroup.Item value="percentage" id="percentage" />
+                                                        <label htmlFor="percentage">
+                                                            <Text size="2">Percentage of Profit</Text>
+                                                        </label>
+                                                    </Flex>
+                                                </Flex>
+                                            </RadioGroup.Root>
+                                        </Box>
+                                        
+                                        <Card style={{
+                                            background: 'rgba(245, 158, 11, 0.1)',
+                                            border: '1px solid rgba(245, 158, 11, 0.3)',
+                                            padding: '12px',
+                                            marginTop: '8px'
+                                        }}>
+                                            <Flex align="center" gap="2">
+                                                <ExclamationTriangleIcon style={{ color: '#f59e0b', flexShrink: 0 }} />
+                                                <Text size="1" style={{ color: '#f59e0b' }}>
+                                                    {formData.amount_type === 'percentage' 
+                                                        ? `This ${formData.percentage}% will be deducted from profit on every order`
+                                                        : 'This amount will be deducted from profit on every order'
+                                                    }
+                                                </Text>
+                                            </Flex>
+                                        </Card>
+                                    </>
                                 )}
                             </Flex>
                         </Card>
 
-                        {/* Due Date and Order ID */}
                         <Grid columns="2" gap="4">
                             <Box>
                                 <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
@@ -295,7 +365,6 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
                             </Box>
                         </Grid>
 
-                        {/* Description */}
                         <Box>
                             <Text size="2" weight="medium" style={{ display: 'block', marginBottom: '8px' }}>
                                 Description / Notes
@@ -312,7 +381,6 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
                             />
                         </Box>
 
-                        {/* Status (only for edit) */}
                         {expense && (
                             <Card style={{
                                 background: formData.status === 'paid' 
@@ -344,7 +412,6 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
                             </Card>
                         )}
 
-                        {/* Info Card */}
                         <Card style={{
                             background: 'rgba(139, 92, 246, 0.05)',
                             border: '1px solid rgba(139, 92, 246, 0.2)',
@@ -358,7 +425,6 @@ const ExpenseFormModal = ({ expense, isOpen, onClose, onSave }) => {
                             </Flex>
                         </Card>
 
-                        {/* Actions */}
                         <Flex gap="3" justify="end" mt="2">
                             <Dialog.Close>
                                 <Button variant="soft" size="3">

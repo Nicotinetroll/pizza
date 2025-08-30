@@ -1,5 +1,3 @@
-// frontend/admin/src/pages/Payouts.jsx
-
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -89,6 +87,7 @@ const Payouts = () => {
     const [partnerModalOpen, setPartnerModalOpen] = useState(false);
     const [selectedPartner, setSelectedPartner] = useState(null);
     const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+    const [selectedExpense, setSelectedExpense] = useState(null);
     const [payoutProcessOpen, setPayoutProcessOpen] = useState(false);
     const [selectedPayoutPartner, setSelectedPayoutPartner] = useState(null);
     const [historyModalOpen, setHistoryModalOpen] = useState(false);
@@ -196,12 +195,27 @@ const Payouts = () => {
         }
     };
 
-    const handleSaveExpense = async (formData) => {
+    const handleSaveExpense = async (formData, expenseId) => {
         try {
-            await payoutsAPI.createExpense(formData);
+            if (expenseId) {
+                await payoutsAPI.updateExpense(expenseId, formData);
+            } else {
+                await payoutsAPI.createExpense(formData);
+            }
             await fetchData();
         } catch (error) {
             console.error('Error saving expense:', error);
+        }
+    };
+
+    const handleDeleteExpense = async (expenseId, expenseName) => {
+        if (confirm(`Are you sure you want to delete "${expenseName}"?`)) {
+            try {
+                await payoutsAPI.deleteExpense(expenseId);
+                await fetchData();
+            } catch (error) {
+                console.error('Error deleting expense:', error);
+            }
         }
     };
 
@@ -426,8 +440,12 @@ const Payouts = () => {
                                                             {partner.commission_percentage}%
                                                         </Badge>
                                                     ) : (
-                                                        <Text size="2" weight="bold">
-                                                            ${partner.fixed_amount}
+                                                        <Text size="3" weight="bold">
+                                                            {expense.percentage && expense.percentage > 0 ? (
+                                                                <>{expense.percentage}%</>
+                                                            ) : (
+                                                                <>${expense.amount.toFixed(2)}</>
+                                                            )}
                                                         </Text>
                                                     )}
                                                 </Table.Cell>
@@ -525,7 +543,10 @@ const Payouts = () => {
                             </Box>
                             <Button
                                 size="3"
-                                onClick={() => setExpenseModalOpen(true)}
+                                onClick={() => {
+                                    setSelectedExpense(null);
+                                    setExpenseModalOpen(true);
+                                }}
                                 style={{
                                     background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
                                 }}
@@ -559,16 +580,18 @@ const Payouts = () => {
                                             <Table.Row key={expense._id}>
                                                 <Table.Cell style={{ padding: '16px' }}>
                                                     <Box>
-                                                        <Text size="2" weight="medium">{expense.name}</Text>
+                                                        <Flex align="center" gap="2" style={{ marginBottom: expense.description ? '4px' : '0' }}>
+                                                            <Text size="2" weight="medium">{expense.name}</Text>
+                                                            {expense.apply_per_order && (
+                                                                <Badge size="1" color="purple" variant="soft">
+                                                                    Recurring per order
+                                                                </Badge>
+                                                            )}
+                                                        </Flex>
                                                         {expense.description && (
                                                             <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
                                                                 {expense.description}
                                                             </Text>
-                                                        )}
-                                                        {expense.apply_per_order && (
-                                                            <Badge size="1" color="purple" variant="soft" style={{ marginTop: '4px' }}>
-                                                                Recurring per order
-                                                            </Badge>
                                                         )}
                                                     </Box>
                                                 </Table.Cell>
@@ -583,7 +606,11 @@ const Payouts = () => {
                                                 </Table.Cell>
                                                 <Table.Cell>
                                                     <Text size="3" weight="bold">
-                                                        ${expense.amount.toFixed(2)}
+                                                        {expense.percentage && expense.percentage > 0 ? (
+                                                            <>{expense.percentage}%</>
+                                                        ) : (
+                                                            <>${expense.amount.toFixed(2)}</>
+                                                        )}
                                                     </Text>
                                                 </Table.Cell>
                                                 <Table.Cell>
@@ -609,25 +636,37 @@ const Payouts = () => {
                                                     )}
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    {expense.apply_per_order ? (
-                                                        <Badge variant="soft" color="purple">
-                                                            Auto-deducted
-                                                        </Badge>
-                                                    ) : expense.status === 'pending' ? (
-                                                        <Button
+                                                    <Flex gap="2">
+                                                        <IconButton
                                                             size="2"
                                                             variant="soft"
-                                                            color="green"
-                                                            onClick={() => handlePayExpense(expense._id)}
+                                                            onClick={() => {
+                                                                setSelectedExpense(expense);
+                                                                setExpenseModalOpen(true);
+                                                            }}
                                                         >
-                                                            <CheckCircledIcon width="14" height="14" />
-                                                            Mark Paid
-                                                        </Button>
-                                                    ) : (
-                                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                                                            Paid
-                                                        </Text>
-                                                    )}
+                                                            <Pencil1Icon width="16" height="16" />
+                                                        </IconButton>
+                                                        <IconButton
+                                                            size="2"
+                                                            variant="soft"
+                                                            color="red"
+                                                            onClick={() => handleDeleteExpense(expense._id, expense.name)}
+                                                        >
+                                                            <TrashIcon width="16" height="16" />
+                                                        </IconButton>
+                                                        {!expense.apply_per_order && expense.status === 'pending' && (
+                                                            <Button
+                                                                size="2"
+                                                                variant="soft"
+                                                                color="green"
+                                                                onClick={() => handlePayExpense(expense._id)}
+                                                            >
+                                                                <CheckCircledIcon width="14" height="14" />
+                                                                Mark Paid
+                                                            </Button>
+                                                        )}
+                                                    </Flex>
                                                 </Table.Cell>
                                             </Table.Row>
                                         ))}
@@ -739,8 +778,12 @@ const Payouts = () => {
 
             {expenseModalOpen && (
                 <ExpenseFormModal
+                    expense={selectedExpense}
                     isOpen={expenseModalOpen}
-                    onClose={() => setExpenseModalOpen(false)}
+                    onClose={() => {
+                        setExpenseModalOpen(false);
+                        setSelectedExpense(null);
+                    }}
                     onSave={handleSaveExpense}
                 />
             )}

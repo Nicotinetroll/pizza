@@ -4,7 +4,6 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
-// Create axios instance with security headers
 const api = axios.create({
   baseURL: API_URL,
   timeout: 10000,
@@ -13,7 +12,6 @@ const api = axios.create({
   }
 });
 
-// Request interceptor for auth
 api.interceptors.request.use(
     (config) => {
       const token = localStorage.getItem('token');
@@ -25,7 +23,6 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// Response interceptor for error handling
 api.interceptors.response.use(
     (response) => response,
     async (error) => {
@@ -38,7 +35,6 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
 
-      // Retry logic for network errors
       if (!error.response && originalRequest._retryCount < MAX_RETRIES) {
         originalRequest._retryCount = (originalRequest._retryCount || 0) + 1;
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
@@ -49,7 +45,6 @@ api.interceptors.response.use(
     }
 );
 
-// Sanitize input to prevent XSS
 const sanitizeInput = (input) => {
   if (typeof input !== 'string') return input;
   return input
@@ -59,16 +54,13 @@ const sanitizeInput = (input) => {
       .trim();
 };
 
-// API methods with input validation
 export const authAPI = {
   login: async (email, password) => {
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       throw new Error('Invalid email format');
     }
 
-    // Password length check
     if (password.length < 4 || password.length > 100) {
       throw new Error('Invalid password length');
     }
@@ -78,7 +70,6 @@ export const authAPI = {
       password: sanitizeInput(password)
     });
 
-    // Store token after successful login
     if (response.data.token) {
       localStorage.setItem('token', response.data.token);
     }
@@ -99,7 +90,6 @@ export const productsAPI = {
   },
 
   create: async (product) => {
-    // Validate product data
     if (!product.name || !product.description || !product.price_usdt) {
       throw new Error('Missing required fields');
     }
@@ -252,7 +242,6 @@ export const usersAPI = {
       throw new Error('Invalid user ID');
     }
 
-    // Validate VIP data
     if (vipData.vip_discount_percentage < 0 || vipData.vip_discount_percentage > 100) {
       throw new Error('Discount must be between 0 and 100');
     }
@@ -274,7 +263,6 @@ export const statsAPI = {
   }
 };
 
-// FIXED SELLERS API - using axios instead of fetch
 export const sellersAPI = {
   getAll: async () => {
     const response = await api.get('/sellers');
@@ -347,7 +335,6 @@ export const sellersAPI = {
     return response.data;
   },
 
-  // FIXED - Using axios instead of fetch!
   assignReferralCode: async (referralId, sellerId) => {
     if (!referralId.match(/^[0-9a-fA-F]{24}$/)) {
       throw new Error('Invalid referral ID');
@@ -419,16 +406,12 @@ export const notificationsAPI = {
   }
 };
 
-// Export dashboard API for compatibility
 export const dashboardAPI = {
   getStats: statsAPI.getDashboard,
   getAnalytics: statsAPI.getAnalytics
 };
 
-// Add this to frontend/admin/src/services/api.js
-
 export const chatAPI = {
-  // Get all conversations
   getConversations: async (unreadOnly = false) => {
     const response = await api.get('/chat/conversations', {
       params: { unread_only: unreadOnly }
@@ -436,7 +419,6 @@ export const chatAPI = {
     return response.data;
   },
 
-  // Get messages for specific user
   getMessages: async (telegramId, skip = 0, limit = 50) => {
     if (!telegramId) {
       throw new Error('Telegram ID required');
@@ -447,7 +429,6 @@ export const chatAPI = {
     return response.data;
   },
 
-  // Send message to user
   sendMessage: async (telegramId, message, attachments = null) => {
     if (!telegramId || !message) {
       throw new Error('Telegram ID and message required');
@@ -461,7 +442,6 @@ export const chatAPI = {
     return response.data;
   },
 
-  // Mark messages as read
   markAsRead: async (telegramId) => {
     if (!telegramId) {
       throw new Error('Telegram ID required');
@@ -470,7 +450,6 @@ export const chatAPI = {
     return response.data;
   },
 
-  // Delete conversation
   deleteConversation: async (telegramId) => {
     if (!telegramId) {
       throw new Error('Telegram ID required');
@@ -482,7 +461,6 @@ export const chatAPI = {
     return response.data;
   },
 
-  // Search messages
   searchMessages: async (query, telegramId = null) => {
     if (!query) {
       throw new Error('Search query required');
@@ -495,20 +473,17 @@ export const chatAPI = {
     return response.data;
   },
 
-  // Get chat statistics
   getStats: async () => {
     const response = await api.get('/chat/stats');
     return response.data;
   },
 
-  // Get quick replies
   getQuickReplies: async () => {
     const response = await api.get('/chat/quick-replies');
     return response.data;
   }
 };
 
-// WebSocket connection for real-time chat
 export class ChatWebSocket {
   constructor(onMessage) {
     this.ws = null;
@@ -527,26 +502,20 @@ export class ChatWebSocket {
       return;
     }
 
-    // Parse token to get email
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       const email = payload.email;
 
-      // Build WebSocket URL
       let wsUrl;
 
-      // Get the current location
       const currentHost = window.location.hostname;
       const currentPort = window.location.port;
 
-      // IMPORTANT: Always use the current port - Vite will proxy it
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
       if (currentPort) {
-        // If there's a port (like 3000 for dev), include it
         wsUrl = `${protocol}//${currentHost}:${currentPort}/ws/chat/${encodeURIComponent(email)}`;
       } else {
-        // No port means we're on standard 80/443
         wsUrl = `${protocol}//${currentHost}/ws/chat/${encodeURIComponent(email)}`;
       }
 
@@ -554,7 +523,6 @@ export class ChatWebSocket {
 
       this.ws = new WebSocket(wsUrl);
 
-      // Set a connection timeout
       const connectionTimeout = setTimeout(() => {
         if (this.ws.readyState !== WebSocket.OPEN) {
           console.warn('WebSocket connection timeout, closing...');
@@ -566,9 +534,8 @@ export class ChatWebSocket {
         clearTimeout(connectionTimeout);
         console.log('Chat WebSocket connected successfully');
         this.reconnectAttempts = 0;
-        this.reconnectDelay = 1000; // Reset delay
+        this.reconnectDelay = 1000;
 
-        // Start ping interval to keep connection alive
         this.pingInterval = setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             try {
@@ -577,7 +544,7 @@ export class ChatWebSocket {
               console.error('Error sending ping:', e);
             }
           }
-        }, 30000); // Ping every 30 seconds
+        }, 30000);
       };
 
       this.ws.onmessage = (event) => {
@@ -601,7 +568,6 @@ export class ChatWebSocket {
 
         this.cleanup();
 
-        // Only reconnect if it wasn't an intentional disconnect
         if (!this.isIntentionalDisconnect && event.code !== 1000 && event.code !== 1001) {
           this.reconnect();
         }
@@ -624,15 +590,13 @@ export class ChatWebSocket {
 
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('Max reconnection attempts reached');
-      // Could notify user here that real-time updates are unavailable
       return;
     }
 
     this.reconnectAttempts++;
-    // Exponential backoff with jitter
     const baseDelay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    const jitter = Math.random() * 1000; // Add up to 1 second of random jitter
-    const delay = Math.min(baseDelay + jitter, 30000); // Cap at 30 seconds
+    const jitter = Math.random() * 1000;
+    const delay = Math.min(baseDelay + jitter, 30000);
 
     console.log(`Reconnecting in ${Math.round(delay)}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
 
@@ -739,7 +703,6 @@ export const customOrdersAPI = {
 };
 
 export const botAPI = {
-  // Messages
   getMessages: async (category = null) => {
     const params = category ? { category } : {};
     const response = await api.get('/bot/messages', { params });
@@ -775,7 +738,6 @@ export const botAPI = {
     return response.data;
   },
 
-  // Commands
   getCommands: async () => {
     const response = await api.get('/bot/commands');
     return response.data;
@@ -805,7 +767,6 @@ export const botAPI = {
     return response.data;
   },
 
-  // Settings
   getSettings: async () => {
     const response = await api.get('/bot/settings');
     return response.data;
@@ -816,7 +777,6 @@ export const botAPI = {
     return response.data;
   },
 
-  // Utilities
   initializeMessages: async () => {
     const response = await api.post('/bot/initialize-messages');
     return response.data;
@@ -829,7 +789,6 @@ export const botAPI = {
 };
 
 export const payoutsAPI = {
-  // Partners
   getPartners: async () => {
     const response = await api.get('/payouts/partners');
     return response.data;
@@ -870,7 +829,6 @@ export const payoutsAPI = {
     return response.data;
   },
 
-  // Expenses
   getExpenses: async (status = null) => {
     const params = status ? { status } : {};
     const response = await api.get('/payouts/expenses', { params });
@@ -886,6 +844,24 @@ export const payoutsAPI = {
     return response.data;
   },
 
+  updateExpense: async (expenseId, expense) => {
+    if (!expenseId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid expense ID');
+    }
+
+    const response = await api.put(`/payouts/expenses/${expenseId}`, expense);
+    return response.data;
+  },
+
+  deleteExpense: async (expenseId) => {
+    if (!expenseId.match(/^[0-9a-fA-F]{24}$/)) {
+      throw new Error('Invalid expense ID');
+    }
+
+    const response = await api.delete(`/payouts/expenses/${expenseId}`);
+    return response.data;
+  },
+
   payExpense: async (expenseId) => {
     if (!expenseId.match(/^[0-9a-fA-F]{24}$/)) {
       throw new Error('Invalid expense ID');
@@ -895,13 +871,11 @@ export const payoutsAPI = {
     return response.data;
   },
 
-  // Calculations
   getCalculations: async () => {
     const response = await api.get('/payouts/calculations');
     return response.data;
   },
 
-  // Process Payout
   processPayout: async (transaction) => {
     if (!transaction.partner_id || !transaction.amount || transaction.amount <= 0) {
       throw new Error('Valid partner ID and amount required');
@@ -911,14 +885,12 @@ export const payoutsAPI = {
     return response.data;
   },
 
-  // History
   getHistory: async (partnerId = null) => {
     const params = partnerId ? { partner_id: partnerId } : {};
     const response = await api.get('/payouts/history', { params });
     return response.data;
   },
 
-  // Stats
   getStats: async () => {
     const response = await api.get('/payouts/stats');
     return response.data;
