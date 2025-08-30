@@ -12,6 +12,7 @@ import {
     DownloadIcon, ReloadIcon
 } from '@radix-ui/react-icons';
 import { notificationsAPI } from '../services/api';
+import NotificationMedia from './NotificationMedia';
 
 const Notifications = () => {
     const [settings, setSettings] = useState({
@@ -32,6 +33,7 @@ const Notifications = () => {
     const [saving, setSaving] = useState(false);
     const [showTemplateForm, setShowTemplateForm] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [activeTab, setActiveTab] = useState('settings');
 
     useEffect(() => {
         fetchSettings();
@@ -145,7 +147,6 @@ const Notifications = () => {
 
     return (
         <Box>
-            {/* Header */}
             <Flex align="center" justify="between" mb="6">
                 <Box>
                     <Heading size="8" weight="bold" style={{ marginBottom: '8px' }}>
@@ -179,652 +180,680 @@ const Notifications = () => {
                 </Flex>
             </Flex>
 
-            {/* Stats Cards */}
-            <Grid columns={{ initial: '2', sm: '2', lg: '4' }} gap="4" mb="6">
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ y: -2 }}
+            <Flex gap="2" mb="6">
+                <Button
+                    size="3"
+                    variant={activeTab === 'settings' ? 'solid' : 'soft'}
+                    onClick={() => setActiveTab('settings')}
+                    style={{
+                        background: activeTab === 'settings' ? 
+                            'linear-gradient(135deg, #f59e0b 0%, #f59e0b90 100%)' : 
+                            'rgba(20, 20, 25, 0.6)'
+                    }}
                 >
-                    <Card style={{
-                        background: 'rgba(20, 20, 25, 0.6)',
-                        backdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                        padding: '20px'
-                    }}>
-                        <Flex align="center" justify="between">
-                            <Box>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
-                                    Status
-                                </Text>
-                                <Badge size="3" color={settings.enabled ? 'green' : 'red'}>
-                                    {settings.enabled ? 'Active' : 'Inactive'}
-                                </Badge>
-                            </Box>
-                            <Box style={{
-                                width: '40px',
-                                height: '40px',
-                                borderRadius: '10px',
-                                background: settings.enabled ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                            }}>
-                                {settings.enabled ? (
-                                    <CheckCircledIcon width="20" height="20" style={{ color: '#10b981' }} />
-                                ) : (
-                                    <CrossCircledIcon width="20" height="20" style={{ color: '#ef4444' }} />
-                                )}
-                            </Box>
-                        </Flex>
-                    </Card>
-                </motion.div>
-
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ y: -2 }}
+                    Settings
+                </Button>
+                <Button
+                    size="3"
+                    variant={activeTab === 'media' ? 'solid' : 'soft'}
+                    onClick={() => setActiveTab('media')}
+                    style={{
+                        background: activeTab === 'media' ? 
+                            'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' : 
+                            'rgba(20, 20, 25, 0.6)'
+                    }}
                 >
-                    <Card style={{
-                        background: 'rgba(20, 20, 25, 0.6)',
-                        backdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                        padding: '20px'
-                    }}>
-                        <Flex align="center" justify="between">
-                            <Box>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
-                                    Templates
-                                </Text>
-                                <Text size="6" weight="bold">
-                                    {templates.length}
-                                </Text>
-                            </Box>
-                            <Box style={{
-                                width: '40px',
-                                height: '40px',
-                                borderRadius: '10px',
-                                background: 'rgba(139, 92, 246, 0.2)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                            }}>
-                                <InfoCircledIcon width="20" height="20" style={{ color: '#8b5cf6' }} />
-                            </Box>
-                        </Flex>
-                    </Card>
-                </motion.div>
+                    Media Gallery
+                </Button>
+            </Flex>
 
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ y: -2 }}
-                >
-                    <Card style={{
-                        background: 'rgba(20, 20, 25, 0.6)',
-                        backdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                        padding: '20px'
-                    }}>
-                        <Flex align="center" justify="between">
-                            <Box>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
-                                    Fake Orders
-                                </Text>
-                                <Badge size="3" color={settings.fake_orders_enabled ? 'amber' : 'gray'}>
-                                    {settings.fake_orders_per_hour}/hour
-                                </Badge>
-                            </Box>
-                            <Box style={{
-                                width: '40px',
-                                height: '40px',
-                                borderRadius: '10px',
-                                background: 'rgba(245, 158, 11, 0.2)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                            }}>
-                                <MagicWandIcon width="20" height="20" style={{ color: '#f59e0b' }} />
-                            </Box>
-                        </Flex>
-                    </Card>
-                </motion.div>
-
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ y: -2 }}
-                >
-                    <Card style={{
-                        background: 'rgba(20, 20, 25, 0.6)',
-                        backdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                        padding: '20px'
-                    }}>
-                        <Flex align="center" justify="between">
-                            <Box>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
-                                    Recent Sent
-                                </Text>
-                                <Text size="6" weight="bold">
-                                    {logs.length}
-                                </Text>
-                            </Box>
-                            <Box style={{
-                                width: '40px',
-                                height: '40px',
-                                borderRadius: '10px',
-                                background: 'rgba(16, 185, 129, 0.2)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                            }}>
-                                <PaperPlaneIcon width="20" height="20" style={{ color: '#10b981' }} />
-                            </Box>
-                        </Flex>
-                    </Card>
-                </motion.div>
-            </Grid>
-
-            {/* Public Channel Settings */}
-            <Card style={{
-                background: 'rgba(20, 20, 25, 0.6)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-                padding: '24px',
-                marginBottom: '24px'
-            }}>
-                <Flex align="center" gap="3" mb="4">
-                    <Box style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '8px',
-                        background: 'linear-gradient(135deg, #f59e0b 0%, #f59e0b90 100%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}>
-                        <BellIcon width="20" height="20" />
-                    </Box>
-                    <Heading size="4">Public Channel Settings</Heading>
-                </Flex>
-
-                <Grid columns={{ initial: '1', md: '2' }} gap="4">
-                    <Box>
-                        <Flex direction="column" gap="4">
-                            <Flex align="center" justify="between" style={{
-                                padding: '12px',
-                                background: 'rgba(255, 255, 255, 0.03)',
-                                borderRadius: '8px'
-                            }}>
-                                <Text size="2">Enable Notifications</Text>
-                                <Switch
-                                    checked={settings.enabled}
-                                    onCheckedChange={(checked) => setSettings({...settings, enabled: checked})}
-                                    style={{ cursor: 'pointer' }}
-                                />
-                            </Flex>
-
-                            <Box>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px', display: 'block' }}>
-                                    Channel/Group ID
-                                </Text>
-                                <TextField.Root
-                                    placeholder="e.g., -1001234567890"
-                                    value={settings.channel_id || ''}
-                                    onChange={(e) => setSettings({...settings, channel_id: e.target.value})}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.03)'
-                                    }}
-                                />
-                            </Box>
-
-                            <Flex align="center" justify="between" style={{
-                                padding: '12px',
-                                background: 'rgba(255, 255, 255, 0.03)',
-                                borderRadius: '8px'
-                            }}>
-                                <Text size="2">Show Exact Amounts</Text>
-                                <Switch
-                                    checked={settings.show_exact_amount}
-                                    onCheckedChange={(checked) => setSettings({...settings, show_exact_amount: checked})}
-                                    style={{ cursor: 'pointer' }}
-                                />
-                            </Flex>
-                        </Flex>
-                    </Box>
-
-                    <Box>
-                        <Flex direction="column" gap="4">
-                            <Box>
-                                <Flex align="center" gap="2" mb="2">
-                                    <ClockIcon width="14" height="14" style={{ opacity: 0.6 }} />
-                                    <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                                        Random Delay (seconds)
-                                    </Text>
-                                </Flex>
-                                <Flex gap="2" align="center">
-                                    <TextField.Root
-                                        type="number"
-                                        placeholder="Min"
-                                        value={settings.delay_min}
-                                        onChange={(e) => setSettings({...settings, delay_min: parseInt(e.target.value) || 0})}
-                                        style={{
-                                            background: 'rgba(255, 255, 255, 0.03)',
-                                            width: '100px'
-                                        }}
-                                    />
-                                    <Text size="2" style={{ opacity: 0.6 }}>to</Text>
-                                    <TextField.Root
-                                        type="number"
-                                        placeholder="Max"
-                                        value={settings.delay_max}
-                                        onChange={(e) => setSettings({...settings, delay_max: parseInt(e.target.value) || 0})}
-                                        style={{
-                                            background: 'rgba(255, 255, 255, 0.03)',
-                                            width: '100px'
-                                        }}
-                                    />
-                                </Flex>
-                            </Box>
-
-                            <Button
-                                size="3"
-                                onClick={saveSettings}
-                                disabled={saving}
-                                style={{
-                                    background: 'linear-gradient(135deg, #f59e0b 0%, #f59e0b90 100%)',
-                                    cursor: saving ? 'not-allowed' : 'pointer',
-                                    opacity: saving ? 0.5 : 1
-                                }}
-                            >
-                                {saving ? 'Saving...' : 'Save All Settings'}
-                            </Button>
-                        </Flex>
-                    </Box>
-                </Grid>
-            </Card>
-
-            {/* Smart Fake Orders */}
-            <Card style={{
-                background: 'rgba(20, 20, 25, 0.6)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(245, 158, 11, 0.2)',
-                padding: '24px',
-                marginBottom: '24px'
-            }}>
-                <Flex align="center" gap="3" mb="4">
-                    <Box style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '8px',
-                        background: 'linear-gradient(135deg, #f59e0b 0%, #dc2626 100%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}>
-                        <MagicWandIcon width="20" height="20" />
-                    </Box>
-                    <Heading size="4">Smart Fake Orders</Heading>
-                </Flex>
-
-                <Grid columns={{ initial: '1', md: '2' }} gap="4">
-                    <Box>
-                        <Flex direction="column" gap="4">
-                            <Flex align="center" justify="between" style={{
-                                padding: '12px',
-                                background: 'rgba(255, 255, 255, 0.03)',
-                                borderRadius: '8px'
-                            }}>
-                                <Text size="2">Enable Automatic Fake Orders</Text>
-                                <Switch
-                                    checked={settings.fake_orders_enabled}
-                                    onCheckedChange={(checked) => setSettings({...settings, fake_orders_enabled: checked})}
-                                    style={{ cursor: 'pointer' }}
-                                />
-                            </Flex>
-
-                            <Box>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px', display: 'block' }}>
-                                    Orders Per Hour
-                                </Text>
-                                <TextField.Root
-                                    type="number"
-                                    min="0"
-                                    value={settings.fake_orders_per_hour}
-                                    onChange={(e) => setSettings({...settings, fake_orders_per_hour: parseInt(e.target.value) || 0})}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.03)'
-                                    }}
-                                />
-                            </Box>
-
-                            <Box>
-                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px', display: 'block' }}>
-                                    Amount Range ($)
-                                </Text>
-                                <Flex gap="2" align="center">
-                                    <TextField.Root
-                                        type="number"
-                                        min="0"
-                                        placeholder="Min"
-                                        value={settings.fake_order_min_amount}
-                                        onChange={(e) => setSettings({...settings, fake_order_min_amount: parseInt(e.target.value) || 100})}
-                                        style={{
-                                            background: 'rgba(255, 255, 255, 0.03)'
-                                        }}
-                                    />
-                                    <Text size="2" style={{ opacity: 0.6 }}>to</Text>
-                                    <TextField.Root
-                                        type="number"
-                                        min="0"
-                                        placeholder="Max"
-                                        value={settings.fake_order_max_amount}
-                                        onChange={(e) => setSettings({...settings, fake_order_max_amount: parseInt(e.target.value) || 3000})}
-                                        style={{
-                                            background: 'rgba(255, 255, 255, 0.03)'
-                                        }}
-                                    />
-                                </Flex>
-                            </Box>
-                        </Flex>
-                    </Box>
-
-                    <Box>
-                        <Flex direction="column" gap="3">
-                            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                                Manual Test
-                            </Text>
-
-                            <Button
-                                size="3"
-                                onClick={sendFakeOrder}
-                                style={{
-                                    background: 'linear-gradient(135deg, #f59e0b 0%, #dc2626 100%)',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                <LightningBoltIcon width="18" height="18" />
-                                Send Smart Fake Order Now
-                            </Button>
-
-                            <Button
-                                size="3"
-                                onClick={saveSettings}
-                                disabled={saving}
-                                variant="soft"
-                                color="green"
-                                style={{
-                                    cursor: saving ? 'not-allowed' : 'pointer',
-                                    opacity: saving ? 0.5 : 1
-                                }}
-                            >
-                                Save Fake Order Settings
-                            </Button>
-                        </Flex>
-                    </Box>
-                </Grid>
-            </Card>
-
-            {/* Message Templates */}
-            <Card style={{
-                background: 'rgba(20, 20, 25, 0.6)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-                padding: '24px',
-                marginBottom: '24px'
-            }}>
-                <Flex align="center" justify="between" mb="4">
-                    <Flex align="center" gap="3">
-                        <Box style={{
-                            width: '36px',
-                            height: '36px',
-                            borderRadius: '8px',
-                            background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}>
-                            <InfoCircledIcon width="20" height="20" />
-                        </Box>
-                        <Heading size="4">Notification Messages</Heading>
-                    </Flex>
-
-                    <Button
-                        size="2"
-                        onClick={() => setShowTemplateForm(!showTemplateForm)}
-                        style={{
-                            background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        <PlusIcon width="16" height="16" />
-                        Add Custom Message
-                    </Button>
-                </Flex>
-
-                <AnimatePresence>
-                    {showTemplateForm && (
+            {activeTab === 'settings' ? (
+                <>
+                    <Grid columns={{ initial: '2', sm: '2', lg: '4' }} gap="4" mb="6">
                         <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.3 }}
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            whileHover={{ y: -2 }}
                         >
                             <Card style={{
-                                background: 'rgba(139, 92, 246, 0.05)',
-                                border: '1px solid rgba(139, 92, 246, 0.2)',
-                                marginBottom: '16px'
+                                background: 'rgba(20, 20, 25, 0.6)',
+                                backdropFilter: 'blur(20px)',
+                                border: '1px solid rgba(255, 255, 255, 0.05)',
+                                padding: '20px'
                             }}>
-                                <TextArea
-                                    placeholder="Create epic message... Use {amount}, {country}, {flag} as variables"
-                                    value={newTemplate}
-                                    onChange={(e) => setNewTemplate(e.target.value)}
-                                    style={{
-                                        background: 'rgba(255, 255, 255, 0.03)',
-                                        minHeight: '100px',
-                                        marginBottom: '12px'
-                                    }}
-                                />
-
-                                <details style={{ marginBottom: '12px' }}>
-                                    <summary style={{
-                                        cursor: 'pointer',
-                                        color: 'rgba(255, 255, 255, 0.6)',
-                                        fontSize: '14px',
-                                        marginBottom: '8px'
+                                <Flex align="center" justify="between">
+                                    <Box>
+                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
+                                            Status
+                                        </Text>
+                                        <Badge size="3" color={settings.enabled ? 'green' : 'red'}>
+                                            {settings.enabled ? 'Active' : 'Inactive'}
+                                        </Badge>
+                                    </Box>
+                                    <Box style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '10px',
+                                        background: settings.enabled ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
                                     }}>
-                                        View Example Templates
-                                    </summary>
-                                    <ScrollArea style={{ maxHeight: '150px', marginTop: '8px' }}>
-                                        <Flex direction="column" gap="2">
-                                            {defaultTemplates.map((template, i) => (
-                                                <Box
-                                                    key={i}
-                                                    onClick={() => setNewTemplate(template)}
-                                                    style={{
-                                                        padding: '8px',
-                                                        background: 'rgba(255, 255, 255, 0.03)',
-                                                        borderRadius: '4px',
-                                                        cursor: 'pointer',
-                                                        fontSize: '12px',
-                                                        color: 'rgba(255, 255, 255, 0.5)',
-                                                        borderLeft: '2px solid #8b5cf6',
-                                                        transition: 'all 0.2s'
-                                                    }}
-                                                    onMouseEnter={(e) => {
-                                                        e.target.style.background = 'rgba(255, 255, 255, 0.05)';
-                                                        e.target.style.color = 'rgba(255, 255, 255, 0.8)';
-                                                    }}
-                                                    onMouseLeave={(e) => {
-                                                        e.target.style.background = 'rgba(255, 255, 255, 0.03)';
-                                                        e.target.style.color = 'rgba(255, 255, 255, 0.5)';
-                                                    }}
-                                                >
-                                                    {template.substring(0, 80)}...
-                                                </Box>
-                                            ))}
-                                        </Flex>
-                                    </ScrollArea>
-                                </details>
-
-                                <Flex gap="3">
-                                    <Button
-                                        size="2"
-                                        onClick={addTemplate}
-                                        color="green"
-                                    >
-                                        Save Template
-                                    </Button>
-                                    <Button
-                                        size="2"
-                                        variant="soft"
-                                        onClick={() => {
-                                            setShowTemplateForm(false);
-                                            setNewTemplate('');
-                                        }}
-                                    >
-                                        Cancel
-                                    </Button>
+                                        {settings.enabled ? (
+                                            <CheckCircledIcon width="20" height="20" style={{ color: '#10b981' }} />
+                                        ) : (
+                                            <CrossCircledIcon width="20" height="20" style={{ color: '#ef4444' }} />
+                                        )}
+                                    </Box>
                                 </Flex>
                             </Card>
                         </motion.div>
-                    )}
-                </AnimatePresence>
 
-                {templates.length === 0 ? (
-                    <Card style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        textAlign: 'center',
-                        padding: '40px'
-                    }}>
-                        <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                            No custom templates yet. System uses default epic messages!
-                        </Text>
-                    </Card>
-                ) : (
-                    <ScrollArea style={{ maxHeight: '300px' }}>
-                        <Flex direction="column" gap="3">
-                            {templates.map((template, index) => (
-                                <motion.div
-                                    key={index}
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: index * 0.05 }}
-                                >
-                                    <Card style={{
-                                        background: 'rgba(255, 255, 255, 0.03)',
-                                        padding: '16px'
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            whileHover={{ y: -2 }}
+                        >
+                            <Card style={{
+                                background: 'rgba(20, 20, 25, 0.6)',
+                                backdropFilter: 'blur(20px)',
+                                border: '1px solid rgba(255, 255, 255, 0.05)',
+                                padding: '20px'
+                            }}>
+                                <Flex align="center" justify="between">
+                                    <Box>
+                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
+                                            Templates
+                                        </Text>
+                                        <Text size="6" weight="bold">
+                                            {templates.length}
+                                        </Text>
+                                    </Box>
+                                    <Box style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '10px',
+                                        background: 'rgba(139, 92, 246, 0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
                                     }}>
-                                        <Flex justify="between" align="start" gap="3">
-                                            <Code size="1" style={{
-                                                flex: 1,
-                                                color: 'rgba(255, 255, 255, 0.7)',
-                                                whiteSpace: 'pre-wrap',
-                                                wordBreak: 'break-word'
-                                            }}>
-                                                {template.text}
-                                            </Code>
-                                            <IconButton
-                                                size="2"
-                                                variant="soft"
-                                                color="red"
-                                                onClick={() => deleteTemplate(index)}
-                                                style={{ cursor: 'pointer' }}
-                                            >
-                                                <TrashIcon width="14" height="14" />
-                                            </IconButton>
-                                        </Flex>
-                                    </Card>
-                                </motion.div>
-                            ))}
+                                        <InfoCircledIcon width="20" height="20" style={{ color: '#8b5cf6' }} />
+                                    </Box>
+                                </Flex>
+                            </Card>
+                        </motion.div>
+
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            whileHover={{ y: -2 }}
+                        >
+                            <Card style={{
+                                background: 'rgba(20, 20, 25, 0.6)',
+                                backdropFilter: 'blur(20px)',
+                                border: '1px solid rgba(255, 255, 255, 0.05)',
+                                padding: '20px'
+                            }}>
+                                <Flex align="center" justify="between">
+                                    <Box>
+                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
+                                            Fake Orders
+                                        </Text>
+                                        <Badge size="3" color={settings.fake_orders_enabled ? 'amber' : 'gray'}>
+                                            {settings.fake_orders_per_hour}/hour
+                                        </Badge>
+                                    </Box>
+                                    <Box style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '10px',
+                                        background: 'rgba(245, 158, 11, 0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}>
+                                        <MagicWandIcon width="20" height="20" style={{ color: '#f59e0b' }} />
+                                    </Box>
+                                </Flex>
+                            </Card>
+                        </motion.div>
+
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            whileHover={{ y: -2 }}
+                        >
+                            <Card style={{
+                                background: 'rgba(20, 20, 25, 0.6)',
+                                backdropFilter: 'blur(20px)',
+                                border: '1px solid rgba(255, 255, 255, 0.05)',
+                                padding: '20px'
+                            }}>
+                                <Flex align="center" justify="between">
+                                    <Box>
+                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', display: 'block', marginBottom: '4px' }}>
+                                            Recent Sent
+                                        </Text>
+                                        <Text size="6" weight="bold">
+                                            {logs.length}
+                                        </Text>
+                                    </Box>
+                                    <Box style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '10px',
+                                        background: 'rgba(16, 185, 129, 0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}>
+                                        <PaperPlaneIcon width="20" height="20" style={{ color: '#10b981' }} />
+                                    </Box>
+                                </Flex>
+                            </Card>
+                        </motion.div>
+                    </Grid>
+
+                    <Card style={{
+                        background: 'rgba(20, 20, 25, 0.6)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.05)',
+                        padding: '24px',
+                        marginBottom: '24px'
+                    }}>
+                        <Flex align="center" gap="3" mb="4">
+                            <Box style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '8px',
+                                background: 'linear-gradient(135deg, #f59e0b 0%, #f59e0b90 100%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <BellIcon width="20" height="20" />
+                            </Box>
+                            <Heading size="4">Public Channel Settings</Heading>
                         </Flex>
-                    </ScrollArea>
-                )}
-            </Card>
 
-            {/* Recent Logs */}
-            <Card style={{
-                background: 'rgba(20, 20, 25, 0.6)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-                padding: '24px'
-            }}>
-                <Flex align="center" gap="3" mb="4">
-                    <Box style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '8px',
-                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}>
-                        <ClockIcon width="20" height="20" />
-                    </Box>
-                    <Heading size="4">Recent Notifications</Heading>
-                </Flex>
-
-                {logs.length === 0 ? (
-                    <Card style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        textAlign: 'center',
-                        padding: '40px'
-                    }}>
-                        <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                            No notifications sent yet
-                        </Text>
-                    </Card>
-                ) : (
-                    <ScrollArea style={{ maxHeight: '400px' }}>
-                        <Flex direction="column" gap="2">
-                            {logs.map((log, index) => (
-                                <motion.div
-                                    key={index}
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    transition={{ delay: index * 0.02 }}
-                                >
-                                    <Card style={{
+                        <Grid columns={{ initial: '1', md: '2' }} gap="4">
+                            <Box>
+                                <Flex direction="column" gap="4">
+                                    <Flex align="center" justify="between" style={{
+                                        padding: '12px',
                                         background: 'rgba(255, 255, 255, 0.03)',
-                                        padding: '12px'
+                                        borderRadius: '8px'
                                     }}>
-                                        <Flex align="center" justify="between">
-                                            <Flex align="center" gap="3">
-                                                <Badge
-                                                    size="2"
-                                                    color={log.type === 'fake_order' ? 'amber' : 'green'}
-                                                >
-                                                    {log.type === 'fake_order' ? '🎭 Fake' : '✅ Real'}
-                                                </Badge>
+                                        <Text size="2">Enable Notifications</Text>
+                                        <Switch
+                                            checked={settings.enabled}
+                                            onCheckedChange={(checked) => setSettings({...settings, enabled: checked})}
+                                            style={{ cursor: 'pointer' }}
+                                        />
+                                    </Flex>
 
-                                                {log.amount && (
-                                                    <Text size="2" weight="bold" style={{ color: '#8b5cf6' }}>
-                                                        ${log.amount.toFixed(2)}
-                                                    </Text>
-                                                )}
+                                    <Box>
+                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px', display: 'block' }}>
+                                            Channel/Group ID
+                                        </Text>
+                                        <TextField.Root
+                                            placeholder="e.g., -1001234567890"
+                                            value={settings.channel_id || ''}
+                                            onChange={(e) => setSettings({...settings, channel_id: e.target.value})}
+                                            style={{
+                                                background: 'rgba(255, 255, 255, 0.03)'
+                                            }}
+                                        />
+                                    </Box>
 
-                                                {log.country && (
-                                                    <Flex align="center" gap="1">
-                                                        <GlobeIcon width="14" height="14" style={{ opacity: 0.6 }} />
-                                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                                                            {log.country}
-                                                        </Text>
-                                                    </Flex>
-                                                )}
-                                            </Flex>
+                                    <Flex align="center" justify="between" style={{
+                                        padding: '12px',
+                                        background: 'rgba(255, 255, 255, 0.03)',
+                                        borderRadius: '8px'
+                                    }}>
+                                        <Text size="2">Show Exact Amounts</Text>
+                                        <Switch
+                                            checked={settings.show_exact_amount}
+                                            onCheckedChange={(checked) => setSettings({...settings, show_exact_amount: checked})}
+                                            style={{ cursor: 'pointer' }}
+                                        />
+                                    </Flex>
+                                </Flex>
+                            </Box>
 
-                                            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
-                                                {new Date(log.sent_at).toLocaleString()}
+                            <Box>
+                                <Flex direction="column" gap="4">
+                                    <Box>
+                                        <Flex align="center" gap="2" mb="2">
+                                            <ClockIcon width="14" height="14" style={{ opacity: 0.6 }} />
+                                            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                                                Random Delay (seconds)
                                             </Text>
                                         </Flex>
+                                        <Flex gap="2" align="center">
+                                            <TextField.Root
+                                                type="number"
+                                                placeholder="Min"
+                                                value={settings.delay_min}
+                                                onChange={(e) => setSettings({...settings, delay_min: parseInt(e.target.value) || 0})}
+                                                style={{
+                                                    background: 'rgba(255, 255, 255, 0.03)',
+                                                    width: '100px'
+                                                }}
+                                            />
+                                            <Text size="2" style={{ opacity: 0.6 }}>to</Text>
+                                            <TextField.Root
+                                                type="number"
+                                                placeholder="Max"
+                                                value={settings.delay_max}
+                                                onChange={(e) => setSettings({...settings, delay_max: parseInt(e.target.value) || 0})}
+                                                style={{
+                                                    background: 'rgba(255, 255, 255, 0.03)',
+                                                    width: '100px'
+                                                }}
+                                            />
+                                        </Flex>
+                                    </Box>
+
+                                    <Button
+                                        size="3"
+                                        onClick={saveSettings}
+                                        disabled={saving}
+                                        style={{
+                                            background: 'linear-gradient(135deg, #f59e0b 0%, #f59e0b90 100%)',
+                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                            opacity: saving ? 0.5 : 1
+                                        }}
+                                    >
+                                        {saving ? 'Saving...' : 'Save All Settings'}
+                                    </Button>
+                                </Flex>
+                            </Box>
+                        </Grid>
+                    </Card>
+
+                    <Card style={{
+                        background: 'rgba(20, 20, 25, 0.6)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(245, 158, 11, 0.2)',
+                        padding: '24px',
+                        marginBottom: '24px'
+                    }}>
+                        <Flex align="center" gap="3" mb="4">
+                            <Box style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '8px',
+                                background: 'linear-gradient(135deg, #f59e0b 0%, #dc2626 100%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <MagicWandIcon width="20" height="20" />
+                            </Box>
+                            <Heading size="4">Smart Fake Orders</Heading>
+                        </Flex>
+
+                        <Grid columns={{ initial: '1', md: '2' }} gap="4">
+                            <Box>
+                                <Flex direction="column" gap="4">
+                                    <Flex align="center" justify="between" style={{
+                                        padding: '12px',
+                                        background: 'rgba(255, 255, 255, 0.03)',
+                                        borderRadius: '8px'
+                                    }}>
+                                        <Text size="2">Enable Automatic Fake Orders</Text>
+                                        <Switch
+                                            checked={settings.fake_orders_enabled}
+                                            onCheckedChange={(checked) => setSettings({...settings, fake_orders_enabled: checked})}
+                                            style={{ cursor: 'pointer' }}
+                                        />
+                                    </Flex>
+
+                                    <Box>
+                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px', display: 'block' }}>
+                                            Orders Per Hour
+                                        </Text>
+                                        <TextField.Root
+                                            type="number"
+                                            min="0"
+                                            value={settings.fake_orders_per_hour}
+                                            onChange={(e) => setSettings({...settings, fake_orders_per_hour: parseInt(e.target.value) || 0})}
+                                            style={{
+                                                background: 'rgba(255, 255, 255, 0.03)'
+                                            }}
+                                        />
+                                    </Box>
+
+                                    <Box>
+                                        <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '8px', display: 'block' }}>
+                                            Amount Range ($)
+                                        </Text>
+                                        <Flex gap="2" align="center">
+                                            <TextField.Root
+                                                type="number"
+                                                min="0"
+                                                placeholder="Min"
+                                                value={settings.fake_order_min_amount}
+                                                onChange={(e) => setSettings({...settings, fake_order_min_amount: parseInt(e.target.value) || 100})}
+                                                style={{
+                                                    background: 'rgba(255, 255, 255, 0.03)'
+                                                }}
+                                            />
+                                            <Text size="2" style={{ opacity: 0.6 }}>to</Text>
+                                            <TextField.Root
+                                                type="number"
+                                                min="0"
+                                                placeholder="Max"
+                                                value={settings.fake_order_max_amount}
+                                                onChange={(e) => setSettings({...settings, fake_order_max_amount: parseInt(e.target.value) || 3000})}
+                                                style={{
+                                                    background: 'rgba(255, 255, 255, 0.03)'
+                                                }}
+                                            />
+                                        </Flex>
+                                    </Box>
+                                </Flex>
+                            </Box>
+
+                            <Box>
+                                <Flex direction="column" gap="3">
+                                    <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                                        Manual Test
+                                    </Text>
+
+                                    <Button
+                                        size="3"
+                                        onClick={sendFakeOrder}
+                                        style={{
+                                            background: 'linear-gradient(135deg, #f59e0b 0%, #dc2626 100%)',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <LightningBoltIcon width="18" height="18" />
+                                        Send Smart Fake Order Now
+                                    </Button>
+
+                                    <Button
+                                        size="3"
+                                        onClick={saveSettings}
+                                        disabled={saving}
+                                        variant="soft"
+                                        color="green"
+                                        style={{
+                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                            opacity: saving ? 0.5 : 1
+                                        }}
+                                    >
+                                        Save Fake Order Settings
+                                    </Button>
+                                </Flex>
+                            </Box>
+                        </Grid>
+                    </Card>
+
+                    <Card style={{
+                        background: 'rgba(20, 20, 25, 0.6)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.05)',
+                        padding: '24px',
+                        marginBottom: '24px'
+                    }}>
+                        <Flex align="center" justify="between" mb="4">
+                            <Flex align="center" gap="3">
+                                <Box style={{
+                                    width: '36px',
+                                    height: '36px',
+                                    borderRadius: '8px',
+                                    background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}>
+                                    <InfoCircledIcon width="20" height="20" />
+                                </Box>
+                                <Heading size="4">Notification Messages</Heading>
+                            </Flex>
+
+                            <Button
+                                size="2"
+                                onClick={() => setShowTemplateForm(!showTemplateForm)}
+                                style={{
+                                    background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <PlusIcon width="16" height="16" />
+                                Add Custom Message
+                            </Button>
+                        </Flex>
+
+                        <AnimatePresence>
+                            {showTemplateForm && (
+                                <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.3 }}
+                                >
+                                    <Card style={{
+                                        background: 'rgba(139, 92, 246, 0.05)',
+                                        border: '1px solid rgba(139, 92, 246, 0.2)',
+                                        marginBottom: '16px'
+                                    }}>
+                                        <TextArea
+                                            placeholder="Create epic message... Use {amount}, {country}, {flag} as variables"
+                                            value={newTemplate}
+                                            onChange={(e) => setNewTemplate(e.target.value)}
+                                            style={{
+                                                background: 'rgba(255, 255, 255, 0.03)',
+                                                minHeight: '100px',
+                                                marginBottom: '12px'
+                                            }}
+                                        />
+
+                                        <details style={{ marginBottom: '12px' }}>
+                                            <summary style={{
+                                                cursor: 'pointer',
+                                                color: 'rgba(255, 255, 255, 0.6)',
+                                                fontSize: '14px',
+                                                marginBottom: '8px'
+                                            }}>
+                                                View Example Templates
+                                            </summary>
+                                            <ScrollArea style={{ maxHeight: '150px', marginTop: '8px' }}>
+                                                <Flex direction="column" gap="2">
+                                                    {defaultTemplates.map((template, i) => (
+                                                        <Box
+                                                            key={i}
+                                                            onClick={() => setNewTemplate(template)}
+                                                            style={{
+                                                                padding: '8px',
+                                                                background: 'rgba(255, 255, 255, 0.03)',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px',
+                                                                color: 'rgba(255, 255, 255, 0.5)',
+                                                                borderLeft: '2px solid #8b5cf6',
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            onMouseEnter={(e) => {
+                                                                e.target.style.background = 'rgba(255, 255, 255, 0.05)';
+                                                                e.target.style.color = 'rgba(255, 255, 255, 0.8)';
+                                                            }}
+                                                            onMouseLeave={(e) => {
+                                                                e.target.style.background = 'rgba(255, 255, 255, 0.03)';
+                                                                e.target.style.color = 'rgba(255, 255, 255, 0.5)';
+                                                            }}
+                                                        >
+                                                            {template.substring(0, 80)}...
+                                                        </Box>
+                                                    ))}
+                                                </Flex>
+                                            </ScrollArea>
+                                        </details>
+
+                                        <Flex gap="3">
+                                            <Button
+                                                size="2"
+                                                onClick={addTemplate}
+                                                color="green"
+                                            >
+                                                Save Template
+                                            </Button>
+                                            <Button
+                                                size="2"
+                                                variant="soft"
+                                                onClick={() => {
+                                                    setShowTemplateForm(false);
+                                                    setNewTemplate('');
+                                                }}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        </Flex>
                                     </Card>
                                 </motion.div>
-                            ))}
+                            )}
+                        </AnimatePresence>
+
+                        {templates.length === 0 ? (
+                            <Card style={{
+                                background: 'rgba(255, 255, 255, 0.03)',
+                                textAlign: 'center',
+                                padding: '40px'
+                            }}>
+                                <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                    No custom templates yet. System uses default epic messages!
+                                </Text>
+                            </Card>
+                        ) : (
+                            <ScrollArea style={{ maxHeight: '300px' }}>
+                                <Flex direction="column" gap="3">
+                                    {templates.map((template, index) => (
+                                        <motion.div
+                                            key={index}
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            transition={{ delay: index * 0.05 }}
+                                        >
+                                            <Card style={{
+                                                background: 'rgba(255, 255, 255, 0.03)',
+                                                padding: '16px'
+                                            }}>
+                                                <Flex justify="between" align="start" gap="3">
+                                                    <Code size="1" style={{
+                                                        flex: 1,
+                                                        color: 'rgba(255, 255, 255, 0.7)',
+                                                        whiteSpace: 'pre-wrap',
+                                                        wordBreak: 'break-word'
+                                                    }}>
+                                                        {template.text}
+                                                    </Code>
+                                                    <IconButton
+                                                        size="2"
+                                                        variant="soft"
+                                                        color="red"
+                                                        onClick={() => deleteTemplate(index)}
+                                                        style={{ cursor: 'pointer' }}
+                                                    >
+                                                        <TrashIcon width="14" height="14" />
+                                                    </IconButton>
+                                                </Flex>
+                                            </Card>
+                                        </motion.div>
+                                    ))}
+                                </Flex>
+                            </ScrollArea>
+                        )}
+                    </Card>
+
+                    <Card style={{
+                        background: 'rgba(20, 20, 25, 0.6)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.05)',
+                        padding: '24px'
+                    }}>
+                        <Flex align="center" gap="3" mb="4">
+                            <Box style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '8px',
+                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <ClockIcon width="20" height="20" />
+                            </Box>
+                            <Heading size="4">Recent Notifications</Heading>
                         </Flex>
-                    </ScrollArea>
-                )}
-            </Card>
+
+                        {logs.length === 0 ? (
+                            <Card style={{
+                                background: 'rgba(255, 255, 255, 0.03)',
+                                textAlign: 'center',
+                                padding: '40px'
+                            }}>
+                                <Text size="3" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                                    No notifications sent yet
+                                </Text>
+                            </Card>
+                        ) : (
+                            <ScrollArea style={{ maxHeight: '400px' }}>
+                                <Flex direction="column" gap="2">
+                                    {logs.map((log, index) => (
+                                        <motion.div
+                                            key={index}
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            transition={{ delay: index * 0.02 }}
+                                        >
+                                            <Card style={{
+                                                background: 'rgba(255, 255, 255, 0.03)',
+                                                padding: '12px'
+                                            }}>
+                                                <Flex align="center" justify="between">
+                                                    <Flex align="center" gap="3">
+                                                        <Badge
+                                                            size="2"
+                                                            color={log.type === 'fake_order' ? 'amber' : 'green'}
+                                                        >
+                                                            {log.type === 'fake_order' ? '🎭 Fake' : '✅ Real'}
+                                                        </Badge>
+
+                                                        {log.amount && (
+                                                            <Text size="2" weight="bold" style={{ color: '#8b5cf6' }}>
+                                                                ${log.amount.toFixed(2)}
+                                                            </Text>
+                                                        )}
+
+                                                        {log.country && (
+                                                            <Flex align="center" gap="1">
+                                                                <GlobeIcon width="14" height="14" style={{ opacity: 0.6 }} />
+                                                                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+                                                                    {log.country}
+                                                                </Text>
+                                                            </Flex>
+                                                        )}
+                                                    </Flex>
+
+                                                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
+                                                        {new Date(log.sent_at).toLocaleString()}
+                                                    </Text>
+                                                </Flex>
+                                            </Card>
+                                        </motion.div>
+                                    ))}
+                                </Flex>
+                            </ScrollArea>
+                        )}
+                    </Card>
+                </>
+            ) : (
+                <NotificationMedia />
+            )}
         </Box>
     );
 };

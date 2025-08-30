@@ -3,6 +3,7 @@ import axios from 'axios';
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -379,6 +380,66 @@ export const notificationsAPI = {
     const response = await api.put('/notifications/settings', settings);
     return response.data;
   },
+
+  uploadMedia: async (file, type) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('type', type);
+        
+        const response = await fetch(`${API_BASE_URL}/notifications/media/upload`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Upload failed');
+        }
+        
+        return response.json();
+    },
+    
+    getMedia: async () => {
+        const response = await fetch(`${API_BASE_URL}/notifications/media`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch media');
+        return response.json();
+    },
+    
+    deleteMedia: async (mediaId) => {
+        const response = await fetch(`${API_BASE_URL}/notifications/media/${mediaId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to delete media');
+        return response.json();
+    },
+    
+      toggleMedia: async (mediaId) => {
+          const response = await fetch(`${API_BASE_URL}/notifications/media/${mediaId}/toggle`, {
+              method: 'PATCH',
+              headers: {
+                  'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                  'Content-Type': 'application/json'
+              }
+          });
+          
+          if (!response.ok) throw new Error('Failed to toggle media');
+          return response.json();
+      },
 
   addTemplate: async (template) => {
     const response = await api.post('/notifications/templates', template);

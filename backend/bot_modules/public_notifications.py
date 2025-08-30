@@ -176,24 +176,20 @@ class PublicNotificationManager:
         else:
             return "$3000+"
     
-    async def format_order_message(self, order_data: dict, settings: dict) -> str:
-        """Format the order message for public notification"""
+    async def format_order_message(self, order_data: dict, settings: dict) -> tuple:
         try:
             country = order_data.get('delivery_country', 'EU')
             flag = self.country_flags.get(country, "🇪🇺")
             amount = float(order_data.get('total_usdt', 0))
             
-            # Get amount display
             amount_display = await self.get_amount_display(
                 amount, 
                 settings.get('show_exact_amount', False)
             )
             
-            # Get template
             templates = settings.get("message_templates", [])
             
             if not templates:
-                # Default templates - epic messages
                 templates = [
                     {"text": "🔥 *BOOM!* {flag} {country} just dropped {amount} on gains\n\n_Another warrior joins the anabolic army_ 💪"},
                     {"text": "💉 *{country} KNOWS WHAT'S UP*\n\n{amount} worth of pure excellence heading to {flag}"},
@@ -202,36 +198,41 @@ class PublicNotificationManager:
                     {"text": "💀 *BEAST MODE: {country}*\n\n{amount} invested in getting absolutely yoked {flag}"},
                 ]
             
-            # Choose random template
             template = random.choice(templates)
             message = template.get("text", "New order from {country}! Amount: {amount}")
             
-            # Replace placeholders
             message = message.replace("{country}", country)
             message = message.replace("{flag}", flag)
             message = message.replace("{amount}", amount_display)
             
-            return message
+            media_list = await self.db.notification_media.find({"enabled": True}).to_list(100)
+            
+            selected_media = None
+            if media_list:
+                selected_media = random.choice(media_list)
+            
+            return message, selected_media
+            
+        except Exception as e:
+            logger.error(f"Error formatting message: {e}")
+            return f"🔥 New order received! 🚀", None
             
         except Exception as e:
             logger.error(f"Error formatting message: {e}")
             return f"🔥 New order received! 🚀"
     
     async def send_notification(self, order_data: dict) -> bool:
-        """Send notification to public channel ONLY for confirmed orders"""
         try:
             settings = await self.get_settings()
             if not settings.get('enabled') or not settings.get('channel_id'):
                 logger.info("Notifications disabled or no channel configured")
                 return False
             
-            # IMPORTANT: Only send notification for PAID/COMPLETED orders
             order_status = order_data.get('status', 'pending')
             if order_status not in ['paid', 'completed']:
                 logger.info(f"Skipping notification for {order_status} order")
                 return False
             
-            # Generate random delay
             delay = random.randint(
                 settings.get('delay_min', 60),
                 settings.get('delay_max', 300)
@@ -240,25 +241,43 @@ class PublicNotificationManager:
             logger.info(f"Scheduling notification in {delay} seconds for order {order_data.get('order_number')}")
             await asyncio.sleep(delay)
             
-            # Format message
-            message = await self.format_order_message(order_data, settings)
+            message, media = await self.format_order_message(order_data, settings)
             
-            # Send to channel
             if self.bot:
-                await self.bot.send_message(
-                    chat_id=settings['channel_id'],
-                    text=message,
-                    parse_mode='Markdown'
-                )
+                if media:
+                    media_path = f"/opt/telegram-shop-bot/media/notifications/{media['filename']}"
+                    
+                    if media['type'] == 'gif':
+                        with open(media_path, 'rb') as f:
+                            await self.bot.send_animation(
+                                chat_id=settings['channel_id'],
+                                animation=f,
+                                caption=message,
+                                parse_mode='Markdown'
+                            )
+                    else:
+                        with open(media_path, 'rb') as f:
+                            await self.bot.send_photo(
+                                chat_id=settings['channel_id'],
+                                photo=f,
+                                caption=message,
+                                parse_mode='Markdown'
+                            )
+                else:
+                    await self.bot.send_message(
+                        chat_id=settings['channel_id'],
+                        text=message,
+                        parse_mode='Markdown'
+                    )
                 
-                # Log the notification
                 await self.db.notification_logs.insert_one({
                     "type": "real_order",
                     "order_id": order_data.get('_id'),
                     "order_number": order_data.get('order_number'),
                     "sent_at": datetime.utcnow(),
                     "channel_id": settings['channel_id'],
-                    "message": message
+                    "message": message,
+                    "media_used": media['filename'] if media else None
                 })
                 
                 logger.info(f"✅ Notification sent for order {order_data.get('order_number')}")

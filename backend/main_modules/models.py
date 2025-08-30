@@ -106,3 +106,10 @@ class ChatMessageModel(BaseModel):
 class ChatStatusModel(BaseModel):
     telegram_id: int
     status: str
+
+class NotificationMediaModel(BaseModel):
+    filename: str
+    url: str
+    type: str
+    enabled: bool = True
+    created_at: Optional[datetime] = None
