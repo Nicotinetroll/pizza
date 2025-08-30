@@ -612,6 +612,10 @@ class PublicNotificationManager:
                     }
                 ]
             
+            # DEBUG LOGGING
+            logger.info(f"📍 Original message: {message}")
+            logger.info(f"📍 Original entities: {entities}")
+            
             # Convert entities for telegram-bot library
             telegram_entities = []
             has_custom_emoji = False
@@ -628,14 +632,22 @@ class PublicNotificationManager:
                         )
                     )
             
+            # DEBUG LOGGING
+            logger.info(f"📍 Has custom emoji: {has_custom_emoji}")
+            logger.info(f"📍 Telegram entities: {telegram_entities}")
+            
             # Don't use parse_mode with custom emojis
             if has_custom_emoji:
                 message = message.replace('*', '').replace('_', '').replace('`', '')
                 parse_mode = None
+                logger.info(f"📍 Cleaned message: {message}")
+                logger.info(f"📍 Parse mode: None (custom emoji mode)")
             else:
                 parse_mode = 'Markdown'
+                logger.info(f"📍 Parse mode: Markdown")
             
             if self.bot:
+                # Try sending with entities parameter (not caption_entities)
                 await self.bot.send_message(
                     chat_id=settings['channel_id'],
                     text=message,
@@ -650,6 +662,8 @@ class PublicNotificationManager:
             
         except Exception as e:
             logger.error(f"Error sending test notification: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
 # Global instance
