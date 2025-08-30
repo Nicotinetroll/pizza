@@ -412,6 +412,20 @@ export const notificationsAPI = {
         return response.json();
     },
 
+    updateTemplate: async (index, template) => {
+        const response = await fetch(`${API_BASE_URL}/notifications/templates/${index}`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(template)
+        });
+        
+        if (!response.ok) throw new Error('Failed to update template');
+        return response.json();
+    },
+
     deleteTemplate: async (index) => {
         const response = await fetch(`${API_BASE_URL}/notifications/templates/${index}`, {
             method: 'DELETE',
