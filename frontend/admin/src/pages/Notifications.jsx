@@ -3,13 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Box, Flex, Grid, Text, Card, Badge, Button, Switch,
     Heading, TextField, Dialog, ScrollArea, Code, IconButton,
-    Separator, TextArea
+    Separator, TextArea, Tooltip
 } from '@radix-ui/themes';
 import {
     BellIcon, PaperPlaneIcon, ClockIcon, RocketIcon,
     TrashIcon, PlusIcon, LightningBoltIcon, CheckCircledIcon,
     CrossCircledIcon, GlobeIcon, InfoCircledIcon, MagicWandIcon,
-    DownloadIcon, ReloadIcon
+    DownloadIcon, ReloadIcon, FaceIcon, CopyIcon, EyeOpenIcon
 } from '@radix-ui/react-icons';
 import { notificationsAPI } from '../services/api';
 import NotificationMedia from './NotificationMedia';
@@ -28,12 +28,18 @@ const Notifications = () => {
     });
     const [templates, setTemplates] = useState([]);
     const [newTemplate, setNewTemplate] = useState('');
+    const [customEmojis, setCustomEmojis] = useState([]);
+    const [showEmojiForm, setShowEmojiForm] = useState(false);
+    const [emojiPosition, setEmojiPosition] = useState('');
+    const [emojiId, setEmojiId] = useState('');
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showTemplateForm, setShowTemplateForm] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState('settings');
+    const [showTestDialog, setShowTestDialog] = useState(false);
+    const [testMessage, setTestMessage] = useState('');
 
     useEffect(() => {
         fetchSettings();
@@ -84,22 +90,70 @@ const Notifications = () => {
         }
     };
 
+    const calculateEntityOffsets = (text) => {
+        // Helper to calculate correct offsets for entities in the text
+        const entities = [];
+        
+        customEmojis.forEach(emoji => {
+            // Find the emoji in text by position or pattern
+            if (emoji.position !== undefined && emoji.position >= 0 && emoji.position < text.length) {
+                entities.push({
+                    offset: emoji.position,
+                    length: emoji.length || 2,
+                    type: "custom_emoji",
+                    custom_emoji_id: emoji.id
+                });
+            }
+        });
+        
+        return entities;
+    };
+
     const addTemplate = async () => {
         if (!newTemplate.trim()) return;
 
         try {
+            // Calculate entities based on custom emojis
+            const entities = calculateEntityOffsets(newTemplate);
+            
             await notificationsAPI.addTemplate({
                 text: newTemplate,
+                entities: entities,
                 type: 'normal',
                 enabled: true
             });
-            alert('✅ Template added!');
+            
+            alert('✅ Template added with custom emojis!');
             setNewTemplate('');
+            setCustomEmojis([]);
             setShowTemplateForm(false);
+            setShowEmojiForm(false);
             fetchSettings();
         } catch (error) {
             alert('❌ Error adding template: ' + error.message);
         }
+    };
+
+    const addCustomEmoji = () => {
+        const pos = parseInt(emojiPosition);
+        if (isNaN(pos) || !emojiId) {
+            alert('Please enter valid position and emoji ID');
+            return;
+        }
+        
+        setCustomEmojis([...customEmojis, {
+            position: pos,
+            id: emojiId,
+            length: 2 // Default length for emoji
+        }]);
+        
+        setEmojiPosition('');
+        setEmojiId('');
+        setShowEmojiForm(false);
+    };
+
+    const removeCustomEmoji = (index) => {
+        setCustomEmojis(customEmojis.filter((_, i) => i !== index));
     };
 
     const deleteTemplate = async (index) => {
@@ -124,12 +178,54 @@ const Notifications = () => {
         }
     };
 
+    const sendTestNotification = async () => {
+        try {
+            if (testMessage) {
+                // Send custom test message
+                await notificationsAPI.sendTest(testMessage);
+            } else {
+                // Send default test
+                await notificationsAPI.sendTest();
+            }
+            alert('✅ Test notification sent!');
+            setShowTestDialog(false);
+            setTestMessage('');
+        } catch (error) {
+            alert('❌ Error: ' + error.message);
+        }
+    };
+
     const defaultTemplates = [
-        "🔥 *BOOM!* {flag} {country} just dropped {amount} on gains\n\n_Another warrior joins the anabolic army_ 💪\n\nThis is the way.",
-        "💉 *{country} KNOWS WHAT'S UP*\n\n{amount} worth of pure anabolic excellence heading to {flag}\n\n_While you're reading this, they're already growing_ 🚀",
-        "⚡ *INJECTION DETECTED*\n\n{flag} {country} injected {amount} into their gains portfolio\n\n_Tren hard, eat clen, anavar give up!_ 💯",
-        "🎯 *{country} MAKING MOVES*\n\nJust secured {amount} in premium gear {flag}\n\n_Someone's about to look absolutely diced_ 🔥\n\nRespect the dedication!",
-        "💀 *BEAST MODE: {country}*\n\n{amount} invested in getting absolutely yoked {flag}\n\n_Leaving humanity behind, one order at a time_ 👹",
+        {
+            text: "🔥 *BOOM!* {flag} {country} just dropped {amount} on gains\n\n_Another warrior joins the anabolic army_ 💪",
+            example: "Simple template with regular emojis"
+        },
+        {
+            text: "😈 *INJECTION COMPLETE* 😈\n\n{flag} {country} secured {amount} in anabolic excellence",
+            example: "Template ready for custom emojis at positions 0 and 25",
+            customEmojiPositions: [0, 25]
+        },
+        {
+            text: "⚡ *BEAST MODE ACTIVATED*\n\n{country} unleashed {amount} on premium gear {flag}\n\n_Tren hard, eat clen, anavar give up!_ 💯",
+            example: "Mixed regular and custom emoji template"
+        },
+        {
+            text: "💀 *{country} KNOWS THE WAY* 💀\n\n{amount} invested in leaving humanity behind {flag}",
+            example: "Custom emoji positions: 0 and 28",
+            customEmojiPositions: [0, 28]
+        },
+        {
+            text: "🎯 *ORDER SECURED*\n\n{flag} {country} → {amount}\n\n_Another satisfied warrior_ 🔥",
+            example: "Clean template with fire emoji"
+        }
+    ];
+
+    const commonCustomEmojis = [
+        { id: "5875309033778322415", name: "Devil", preview: "😈" },
+        { id: "5877377834838761408", name: "Fire", preview: "🔥" },
+        { id: "5875452388063182935", name: "100", preview: "💯" },
+        { id: "5877610436388110336", name: "Muscle", preview: "💪" },
+        { id: "5875566962267299045", name: "Skull", preview: "💀" }
     ];
 
     if (loading) {
@@ -153,11 +249,23 @@ const Notifications = () => {
                         Notification Settings
                     </Heading>
                     <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-                        Configure public channel notifications and fake orders
+                        Configure public channel notifications with custom emoji support
                     </Text>
                 </Box>
 
                 <Flex gap="3">
+                    <Button
+                        size="3"
+                        variant="surface"
+                        onClick={() => setShowTestDialog(true)}
+                        style={{
+                            background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'
+                        }}
+                    >
+                        <LightningBoltIcon width="18" height="18" />
+                        Test Notification
+                    </Button>
+                    
                     <Button
                         size="3"
                         variant="surface"
@@ -611,9 +719,9 @@ const Notifications = () => {
                                     alignItems: 'center',
                                     justifyContent: 'center'
                                 }}>
-                                    <InfoCircledIcon width="20" height="20" />
+                                    <FaceIcon width="20" height="20" />
                                 </Box>
-                                <Heading size="4">Notification Messages</Heading>
+                                <Heading size="4">Notification Messages with Custom Emojis</Heading>
                             </Flex>
 
                             <Button
@@ -640,7 +748,8 @@ const Notifications = () => {
                                     <Card style={{
                                         background: 'rgba(139, 92, 246, 0.05)',
                                         border: '1px solid rgba(139, 92, 246, 0.2)',
-                                        marginBottom: '16px'
+                                        marginBottom: '16px',
+                                        padding: '16px'
                                     }}>
                                         <TextArea
                                             placeholder="Create epic message... Use {amount}, {country}, {flag} as variables"
@@ -653,6 +762,121 @@ const Notifications = () => {
                                             }}
                                         />
 
+                                        {/* Custom Emoji Section */}
+                                        <Card style={{
+                                            background: 'rgba(139, 92, 246, 0.1)',
+                                            border: '1px solid rgba(139, 92, 246, 0.15)',
+                                            padding: '12px',
+                                            marginBottom: '12px'
+                                        }}>
+                                            <Flex align="center" justify="between" mb="3">
+                                                <Text size="2" weight="bold" style={{ color: '#8b5cf6' }}>
+                                                    🎨 Custom Emoji Configuration
+                                                </Text>
+                                                <Button
+                                                    size="1"
+                                                    variant="soft"
+                                                    onClick={() => setShowEmojiForm(!showEmojiForm)}
+                                                >
+                                                    {showEmojiForm ? 'Hide' : 'Add'} Custom Emoji
+                                                </Button>
+                                            </Flex>
+
+                                            {showEmojiForm && (
+                                                <Card style={{
+                                                    background: 'rgba(255, 255, 255, 0.03)',
+                                                    padding: '12px',
+                                                    marginBottom: '12px'
+                                                }}>
+                                                    <Grid columns="2" gap="3" mb="3">
+                                                        <Box>
+                                                            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '4px', display: 'block' }}>
+                                                                Position in text
+                                                            </Text>
+                                                            <TextField.Root
+                                                                placeholder="e.g., 0"
+                                                                type="number"
+                                                                value={emojiPosition}
+                                                                onChange={(e) => setEmojiPosition(e.target.value)}
+                                                                style={{ background: 'rgba(255, 255, 255, 0.05)' }}
+                                                            />
+                                                        </Box>
+                                                        <Box>
+                                                            <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.6)', marginBottom: '4px', display: 'block' }}>
+                                                                Custom Emoji ID
+                                                            </Text>
+                                                            <TextField.Root
+                                                                placeholder="e.g., 5875309033778322415"
+                                                                value={emojiId}
+                                                                onChange={(e) => setEmojiId(e.target.value)}
+                                                                style={{ background: 'rgba(255, 255, 255, 0.05)' }}
+                                                            />
+                                                        </Box>
+                                                    </Grid>
+
+                                                    <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)', marginBottom: '8px', display: 'block' }}>
+                                                        Quick Select Common Emojis:
+                                                    </Text>
+                                                    <Flex gap="2" wrap="wrap" mb="3">
+                                                        {commonCustomEmojis.map((emoji) => (
+                                                            <Tooltip content={`ID: ${emoji.id}`} key={emoji.id}>
+                                                                <Button
+                                                                    size="1"
+                                                                    variant="soft"
+                                                                    onClick={() => setEmojiId(emoji.id)}
+                                                                    style={{ cursor: 'pointer' }}
+                                                                >
+                                                                    {emoji.preview} {emoji.name}
+                                                                </Button>
+                                                            </Tooltip>
+                                                        ))}
+                                                    </Flex>
+
+                                                    <Button
+                                                        size="2"
+                                                        onClick={addCustomEmoji}
+                                                        color="green"
+                                                        style={{ width: '100%' }}
+                                                    >
+                                                        Add This Emoji
+                                                    </Button>
+                                                </Card>
+                                            )}
+
+                                            {customEmojis.length > 0 && (
+                                                <Box>
+                                                    <Text size="2" style={{ marginBottom: '8px', display: 'block' }}>
+                                                        Added Custom Emojis:
+                                                    </Text>
+                                                    <Flex gap="2" wrap="wrap">
+                                                        {customEmojis.map((emoji, idx) => (
+                                                            <Badge 
+                                                                key={idx} 
+                                                                size="2"
+                                                                style={{ 
+                                                                    padding: '4px 8px',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '4px'
+                                                                }}
+                                                            >
+                                                                Pos: {emoji.position} | ID: {emoji.id.substring(0, 8)}...
+                                                                <IconButton
+                                                                    size="1"
+                                                                    variant="ghost"
+                                                                    color="red"
+                                                                    onClick={() => removeCustomEmoji(idx)}
+                                                                    style={{ marginLeft: '4px', cursor: 'pointer' }}
+                                                                >
+                                                                    <CrossCircledIcon width="12" height="12" />
+                                                                </IconButton>
+                                                            </Badge>
+                                                        ))}
+                                                    </Flex>
+                                                </Box>
+                                            )}
+                                        </Card>
+
                                         <details style={{ marginBottom: '12px' }}>
                                             <summary style={{
                                                 cursor: 'pointer',
@@ -660,35 +884,40 @@ const Notifications = () => {
                                                 fontSize: '14px',
                                                 marginBottom: '8px'
                                             }}>
-                                                View Example Templates
+                                                View Example Templates (click to use)
                                             </summary>
-                                            <ScrollArea style={{ maxHeight: '150px', marginTop: '8px' }}>
+                                            <ScrollArea style={{ maxHeight: '200px', marginTop: '8px' }}>
                                                 <Flex direction="column" gap="2">
                                                     {defaultTemplates.map((template, i) => (
-                                                        <Box
+                                                        <Card
                                                             key={i}
-                                                            onClick={() => setNewTemplate(template)}
+                                                            onClick={() => setNewTemplate(template.text)}
                                                             style={{
-                                                                padding: '8px',
+                                                                padding: '12px',
                                                                 background: 'rgba(255, 255, 255, 0.03)',
-                                                                borderRadius: '4px',
                                                                 cursor: 'pointer',
-                                                                fontSize: '12px',
-                                                                color: 'rgba(255, 255, 255, 0.5)',
-                                                                borderLeft: '2px solid #8b5cf6',
+                                                                borderLeft: '3px solid #8b5cf6',
                                                                 transition: 'all 0.2s'
                                                             }}
                                                             onMouseEnter={(e) => {
-                                                                e.target.style.background = 'rgba(255, 255, 255, 0.05)';
-                                                                e.target.style.color = 'rgba(255, 255, 255, 0.8)';
+                                                                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
                                                             }}
                                                             onMouseLeave={(e) => {
-                                                                e.target.style.background = 'rgba(255, 255, 255, 0.03)';
-                                                                e.target.style.color = 'rgba(255, 255, 255, 0.5)';
+                                                                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
                                                             }}
                                                         >
-                                                            {template.substring(0, 80)}...
-                                                        </Box>
+                                                            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.8)', marginBottom: '4px' }}>
+                                                                {template.text.substring(0, 100)}...
+                                                            </Text>
+                                                            <Text size="1" style={{ color: 'rgba(139, 92, 246, 0.8)' }}>
+                                                                {template.example}
+                                                            </Text>
+                                                            {template.customEmojiPositions && (
+                                                                <Badge size="1" color="purple" style={{ marginTop: '4px' }}>
+                                                                    Custom emoji ready at positions: {template.customEmojiPositions.join(', ')}
+                                                                </Badge>
+                                                            )}
+                                                        </Card>
                                                     ))}
                                                 </Flex>
                                             </ScrollArea>
@@ -699,6 +928,7 @@ const Notifications = () => {
                                                 size="2"
                                                 onClick={addTemplate}
                                                 color="green"
+                                                style={{ cursor: 'pointer' }}
                                             >
                                                 Save Template
                                             </Button>
@@ -708,6 +938,8 @@ const Notifications = () => {
                                                 onClick={() => {
                                                     setShowTemplateForm(false);
                                                     setNewTemplate('');
+                                                    setCustomEmojis([]);
+                                                    setShowEmojiForm(false);
                                                 }}
                                             >
                                                 Cancel
@@ -729,7 +961,7 @@ const Notifications = () => {
                                 </Text>
                             </Card>
                         ) : (
-                            <ScrollArea style={{ maxHeight: '300px' }}>
+                            <ScrollArea style={{ maxHeight: '400px' }}>
                                 <Flex direction="column" gap="3">
                                     {templates.map((template, index) => (
                                         <motion.div
@@ -743,14 +975,27 @@ const Notifications = () => {
                                                 padding: '16px'
                                             }}>
                                                 <Flex justify="between" align="start" gap="3">
-                                                    <Code size="1" style={{
-                                                        flex: 1,
-                                                        color: 'rgba(255, 255, 255, 0.7)',
-                                                        whiteSpace: 'pre-wrap',
-                                                        wordBreak: 'break-word'
-                                                    }}>
-                                                        {template.text}
-                                                    </Code>
+                                                    <Box style={{ flex: 1 }}>
+                                                        <Code size="1" style={{
+                                                            color: 'rgba(255, 255, 255, 0.7)',
+                                                            whiteSpace: 'pre-wrap',
+                                                            wordBreak: 'break-word',
+                                                            display: 'block',
+                                                            marginBottom: '8px'
+                                                        }}>
+                                                            {template.text}
+                                                        </Code>
+                                                        {template.entities && template.entities.length > 0 && (
+                                                            <Flex gap="2" wrap="wrap">
+                                                                {template.entities.map((entity, idx) => (
+                                                                    <Badge key={idx} size="1" color="purple">
+                                                                        {entity.type === 'custom_emoji' ? '🎨' : '📝'} 
+                                                                        Pos: {entity.offset}
+                                                                    </Badge>
+                                                                ))}
+                                                            </Flex>
+                                                        )}
+                                                    </Box>
                                                     <IconButton
                                                         size="2"
                                                         variant="soft"
@@ -837,6 +1082,12 @@ const Notifications = () => {
                                                                 </Text>
                                                             </Flex>
                                                         )}
+
+                                                        {log.entities && log.entities.length > 0 && (
+                                                            <Badge size="1" color="purple">
+                                                                🎨 Custom
+                                                            </Badge>
+                                                        )}
                                                     </Flex>
 
                                                     <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
@@ -850,6 +1101,38 @@ const Notifications = () => {
                             </ScrollArea>
                         )}
                     </Card>
+
+                    {/* Test Notification Dialog */}
+                    <Dialog.Root open={showTestDialog} onOpenChange={setShowTestDialog}>
+                        <Dialog.Content style={{ maxWidth: 450 }}>
+                            <Dialog.Title>Send Test Notification</Dialog.Title>
+                            <Dialog.Description size="2" mb="4">
+                                Send a test notification to your channel to verify everything works.
+                            </Dialog.Description>
+
+                            <TextArea
+                                placeholder="Custom test message (optional)... Leave empty for default test"
+                                value={testMessage}
+                                onChange={(e) => setTestMessage(e.target.value)}
+                                style={{
+                                    background: 'rgba(255, 255, 255, 0.03)',
+                                    minHeight: '100px',
+                                    marginBottom: '16px'
+                                }}
+                            />
+
+                            <Flex gap="3" mt="4" justify="end">
+                                <Dialog.Close>
+                                    <Button variant="soft" color="gray">
+                                        Cancel
+                                    </Button>
+                                </Dialog.Close>
+                                <Button onClick={sendTestNotification} color="green">
+                                    Send Test
+                                </Button>
+                            </Flex>
+                        </Dialog.Content>
+                    </Dialog.Root>
                 </>
             ) : (
                 <NotificationMedia />
