@@ -8,7 +8,7 @@ from .helpers import verify_token
 
 router_tickets = APIRouter(prefix="/api/tickets", tags=["Support Tickets"])
 
-@router_tickets.get("/")
+@router_tickets.get("")
 async def get_tickets(
     status: Optional[str] = None,
     priority: Optional[str] = None,
