@@ -830,8 +830,6 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
             )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from .support_handlers import user_ticket_state, handle_text_message
-    
     user_id = update.effective_user.id
     username = update.effective_user.username or f"user{user_id}"
     first_name = update.effective_user.first_name
@@ -847,10 +845,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         first_name=first_name,
         last_name=last_name
     )
-    
-    if user_id in user_ticket_state:
-        await handle_text_message(update, context)
-        return
     
     if state == "waiting_city":
         await handle_city_input(update, context, text)
