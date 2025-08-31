@@ -1,5 +1,3 @@
-# backend/main_modules/endpoints_payouts.py
-
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -162,7 +160,7 @@ async def get_expenses(status: Optional[str] = None):
         if status:
             query["status"] = status
         
-        expenses = await db.expenses.find(query).sort("created_at", -1).to_list(100)
+        expenses = await db.expenses.find(query).sort("created_at", -1).to_list(None)
         
         for expense in expenses:
             expense["_id"] = str(expense["_id"])
@@ -201,7 +199,6 @@ async def create_expense(expense: Expense):
 
 @router.put("/expenses/{expense_id}")
 async def update_expense(expense_id: str, expense: dict):
-    """Update an expense"""
     try:
         if not ObjectId.is_valid(expense_id):
             raise HTTPException(status_code=400, detail="Invalid expense ID")
@@ -234,7 +231,6 @@ async def update_expense(expense_id: str, expense: dict):
 
 @router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str):
-    """Delete an expense"""
     try:
         if not ObjectId.is_valid(expense_id):
             raise HTTPException(status_code=400, detail="Invalid expense ID")
@@ -272,15 +268,19 @@ async def pay_expense(expense_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/calculations")
-async def get_payout_calculations():
+async def get_payout_calculations(skip: int = 0, limit: int = 100):
     try:
         partners = await db.payout_partners.find(
             {"is_active": True}
         ).sort("priority", 1).to_list(None)
         
+        total_orders = await db.orders.count_documents(
+            {"status": {"$in": ["paid", "completed", "processing"]}}
+        )
+        
         orders = await db.orders.find(
             {"status": {"$in": ["paid", "completed", "processing"]}}
-        ).sort("created_at", -1).limit(100).to_list(None)
+        ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
         
         all_products = await db.products.find({}).to_list(None)
         products_by_name = {p["name"]: p for p in all_products}
@@ -405,7 +405,10 @@ async def get_payout_calculations():
         return {
             "calculations": calculations,
             "partner_totals": total_partner_payouts,
-            "total_orders": len(calculations)
+            "total_orders": total_orders,
+            "has_more": skip + limit < total_orders,
+            "current_page": skip // limit + 1,
+            "total_pages": (total_orders + limit - 1) // limit
         }
         
     except Exception as e:
@@ -456,7 +459,7 @@ async def get_payout_history(partner_id: Optional[str] = None):
         if partner_id:
             query["partner_id"] = ObjectId(partner_id)
         
-        history = await db.payout_transactions.find(query).sort("created_at", -1).limit(100).to_list(None)
+        history = await db.payout_transactions.find(query).sort("created_at", -1).to_list(None)
         
         for transaction in history:
             transaction["_id"] = str(transaction["_id"])
@@ -515,5 +518,155 @@ async def get_payout_stats():
             "pending_expenses": pending_expenses[0]["total"] if pending_expenses else 0,
             "active_partners": active_partners_count
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/calculations/all")
+async def get_all_payout_calculations():
+    try:
+        partners = await db.payout_partners.find(
+            {"is_active": True}
+        ).sort("priority", 1).to_list(None)
+        
+        batch_size = 100
+        skip = 0
+        all_calculations = []
+        total_partner_payouts = {}
+        
+        all_products = await db.products.find({}).to_list(None)
+        products_by_name = {p["name"]: p for p in all_products}
+        
+        recurring_expenses = await db.expenses.find({
+            "apply_per_order": True,
+            "status": {"$ne": "cancelled"}
+        }).to_list(None)
+        
+        while True:
+            orders = await db.orders.find(
+                {"status": {"$in": ["paid", "completed", "processing"]}}
+            ).sort("created_at", -1).skip(skip).limit(batch_size).to_list(batch_size)
+            
+            if not orders:
+                break
+            
+            for order in orders:
+                order_calc = {
+                    "order_number": order.get("order_number"),
+                    "order_date": order.get("created_at"),
+                    "total_usdt": float(order.get("total_usdt", 0)),
+                    "base_profit": 0,
+                    "deductions": [],
+                    "final_profit": 0
+                }
+                
+                original_total = float(order.get("total_usdt", 0))
+                discount_amount = float(order.get("discount_amount", 0))
+                original_price_before_discount = original_total + discount_amount
+                
+                base_profit = 0
+                total_purchase_cost = 0
+                
+                if order.get("items") and len(order["items"]) > 0:
+                    for item in order["items"]:
+                        quantity = item.get("quantity", 1)
+                        
+                        purchase_price = float(item.get("purchase_price_usdt", 0))
+                        
+                        if purchase_price == 0:
+                            product_name = item.get("product_name", "")
+                            product = products_by_name.get(product_name)
+                            if product:
+                                purchase_price = float(product.get("purchase_price_usdt", 0))
+                        
+                        total_purchase_cost += purchase_price * quantity
+                
+                base_profit = original_price_before_discount - total_purchase_cost
+                order_calc["base_profit"] = base_profit
+                
+                current_profit = base_profit
+                
+                for expense in recurring_expenses:
+                    expense_amount = 0
+                    expense_name = expense.get('name')
+                    
+                    if expense.get('amount_type') == 'percentage' and expense.get('percentage'):
+                        percentage = float(expense.get('percentage', 0))
+                        if percentage > 0 and current_profit > 0:
+                            expense_amount = current_profit * (percentage / 100)
+                            expense_name = f"{expense.get('name')} ({percentage}%)"
+                    else:
+                        expense_amount = float(expense.get('amount', 0))
+                    
+                    if expense_amount > 0:
+                        order_calc["deductions"].append({
+                            "type": "expense",
+                            "name": f"{expense_name} ({expense.get('type', 'expense')})",
+                            "rate": expense.get('percentage', 0) if expense.get('amount_type') == 'percentage' else 0,
+                            "amount": expense_amount
+                        })
+                        current_profit -= expense_amount
+                
+                if discount_amount > 0:
+                    order_calc["deductions"].append({
+                        "type": "discount",
+                        "name": "Customer Discount",
+                        "rate": 0,
+                        "amount": discount_amount
+                    })
+                    current_profit -= discount_amount
+                
+                if order.get("referral_code"):
+                    referral = await db.referral_codes.find_one({"code": order["referral_code"]})
+                    if referral and referral.get("seller_id"):
+                        seller = await db.sellers.find_one({"_id": ObjectId(referral["seller_id"])})
+                        if seller and current_profit > 0:
+                            commission_rate = float(seller.get("commission_percentage", 30))
+                            commission = current_profit * (commission_rate / 100)
+                            order_calc["deductions"].append({
+                                "type": "seller_commission",
+                                "name": seller.get("name"),
+                                "rate": commission_rate,
+                                "amount": commission
+                            })
+                            current_profit -= commission
+                
+                for partner in partners:
+                    if partner["type"] == "partner" and partner.get("commission_percentage") and current_profit > 0:
+                        commission_rate = float(partner["commission_percentage"])
+                        commission = current_profit * (commission_rate / 100)
+                        
+                        order_calc["deductions"].append({
+                            "type": "partner_commission",
+                            "name": partner["name"],
+                            "rate": commission_rate,
+                            "amount": commission,
+                            "base_amount": current_profit
+                        })
+                        
+                        partner_id = str(partner["_id"])
+                        if partner_id not in total_partner_payouts:
+                            total_partner_payouts[partner_id] = {
+                                "name": partner["name"],
+                                "total": 0,
+                                "count": 0
+                            }
+                        total_partner_payouts[partner_id]["total"] += commission
+                        total_partner_payouts[partner_id]["count"] += 1
+                        
+                        current_profit -= commission
+                
+                order_calc["final_profit"] = current_profit
+                all_calculations.append(order_calc)
+            
+            skip += batch_size
+            
+            await asyncio.sleep(0.01)
+        
+        return {
+            "calculations": all_calculations,
+            "partner_totals": total_partner_payouts,
+            "total_orders": len(all_calculations)
+        }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

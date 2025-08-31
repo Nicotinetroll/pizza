@@ -949,112 +949,133 @@ export const botAPI = {
 };
 
 export const payoutsAPI = {
-  getPartners: async () => {
-    const response = await api.get('/payouts/partners');
-    return response.data;
-  },
-
-  createPartner: async (partner) => {
-    if (!partner.name) {
-      throw new Error('Partner name is required');
+    getPartners: async () => {
+        const response = await fetch('/api/payouts/partners', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    createPartner: async (partnerData) => {
+        const response = await fetch('/api/payouts/partners', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify(partnerData)
+        });
+        return response.json();
+    },
+    
+    updatePartner: async (partnerId, partnerData) => {
+        const response = await fetch(`/api/payouts/partners/${partnerId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify(partnerData)
+        });
+        return response.json();
+    },
+    
+    deletePartner: async (partnerId, hard = false) => {
+        const response = await fetch(`/api/payouts/partners/${partnerId}?hard=${hard}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    getExpenses: async (status = null) => {
+        const url = status ? `/api/payouts/expenses?status=${status}` : '/api/payouts/expenses';
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    createExpense: async (expenseData) => {
+        const response = await fetch('/api/payouts/expenses', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify(expenseData)
+        });
+        return response.json();
+    },
+    
+    updateExpense: async (expenseId, expenseData) => {
+        const response = await fetch(`/api/payouts/expenses/${expenseId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify(expenseData)
+        });
+        return response.json();
+    },
+    
+    deleteExpense: async (expenseId) => {
+        const response = await fetch(`/api/payouts/expenses/${expenseId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    payExpense: async (expenseId) => {
+        const response = await fetch(`/api/payouts/expenses/${expenseId}/pay`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    getCalculations: async () => {
+        const response = await fetch('/api/payouts/calculations', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    getAllCalculations: async () => {
+        const response = await fetch('/api/payouts/calculations/all', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    processPayout: async (payoutData) => {
+        const response = await fetch('/api/payouts/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify(payoutData)
+        });
+        return response.json();
+    },
+    
+    getHistory: async (partnerId = null) => {
+        const url = partnerId ? `/api/payouts/history?partner_id=${partnerId}` : '/api/payouts/history';
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
+    },
+    
+    getStats: async () => {
+        const response = await fetch('/api/payouts/stats', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        return response.json();
     }
-
-    if (partner.type === 'partner' && (!partner.commission_percentage || partner.commission_percentage <= 0)) {
-      throw new Error('Valid commission percentage required for partners');
-    }
-
-    if (partner.type === 'service' && (!partner.fixed_amount || partner.fixed_amount <= 0)) {
-      throw new Error('Valid fixed amount required for services');
-    }
-
-    const response = await api.post('/payouts/partners', partner);
-    return response.data;
-  },
-
-  updatePartner: async (partnerId, partner) => {
-    if (!partnerId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid partner ID');
-    }
-
-    const response = await api.put(`/payouts/partners/${partnerId}`, partner);
-    return response.data;
-  },
-
-  deletePartner: async (partnerId) => {
-    if (!partnerId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid partner ID');
-    }
-
-    const response = await api.delete(`/payouts/partners/${partnerId}`);
-    return response.data;
-  },
-
-  getExpenses: async (status = null) => {
-    const params = status ? { status } : {};
-    const response = await api.get('/payouts/expenses', { params });
-    return response.data;
-  },
-
-  createExpense: async (expense) => {
-    if (!expense.name || expense.amount <= 0) {
-      throw new Error('Valid expense name and amount required');
-    }
-
-    const response = await api.post('/payouts/expenses', expense);
-    return response.data;
-  },
-
-  updateExpense: async (expenseId, expense) => {
-    if (!expenseId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid expense ID');
-    }
-
-    const response = await api.put(`/payouts/expenses/${expenseId}`, expense);
-    return response.data;
-  },
-
-  deleteExpense: async (expenseId) => {
-    if (!expenseId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid expense ID');
-    }
-
-    const response = await api.delete(`/payouts/expenses/${expenseId}`);
-    return response.data;
-  },
-
-  payExpense: async (expenseId) => {
-    if (!expenseId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid expense ID');
-    }
-
-    const response = await api.patch(`/payouts/expenses/${expenseId}/pay`);
-    return response.data;
-  },
-
-  getCalculations: async () => {
-    const response = await api.get('/payouts/calculations');
-    return response.data;
-  },
-
-  processPayout: async (transaction) => {
-    if (!transaction.partner_id || !transaction.amount || transaction.amount <= 0) {
-      throw new Error('Valid partner ID and amount required');
-    }
-
-    const response = await api.post('/payouts/process', transaction);
-    return response.data;
-  },
-
-  getHistory: async (partnerId = null) => {
-    const params = partnerId ? { partner_id: partnerId } : {};
-    const response = await api.get('/payouts/history', { params });
-    return response.data;
-  },
-
-  getStats: async () => {
-    const response = await api.get('/payouts/stats');
-    return response.data;
-  }
 };
 
 export const ticketsAPI = {
