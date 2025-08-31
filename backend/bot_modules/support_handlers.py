@@ -561,7 +561,7 @@ async def closeticket_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 def get_support_conversation_handler():
     return ConversationHandler(
         entry_points=[
-            CommandHandler('support', support_command),
+            CommandHandler('support', support_command, filters=filters.ChatType.PRIVATE),
             CallbackQueryHandler(show_support_menu, pattern="^support_menu$")
         ],
         states={

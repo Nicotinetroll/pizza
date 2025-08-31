@@ -157,8 +157,8 @@ async def register_dynamic_commands(application):
         application.add_handler(requests_handler)
         
         application.add_handler(get_support_conversation_handler())
-        application.add_handler(CommandHandler("mytickets", mytickets_command))
-        application.add_handler(CommandHandler("closeticket", closeticket_command))
+        application.add_handler(CommandHandler("mytickets", mytickets_command, filters=filters.ChatType.PRIVATE))
+        application.add_handler(CommandHandler("closeticket", closeticket_command, filters=filters.ChatType.PRIVATE))
         
         logger.info(f"✅ Registration complete: {len(registered_commands) + 6} commands including /support")
         return True
@@ -207,8 +207,8 @@ def register_fallback_commands(application):
     ))
     
     application.add_handler(get_support_conversation_handler())
-    application.add_handler(CommandHandler("mytickets", mytickets_command))
-    application.add_handler(CommandHandler("closeticket", closeticket_command))
+    application.add_handler(CommandHandler("mytickets", mytickets_command, filters=filters.ChatType.PRIVATE))
+    application.add_handler(CommandHandler("closeticket", closeticket_command, filters=filters.ChatType.PRIVATE))
     
     logger.info("Registered 9 fallback commands including /support")
 
