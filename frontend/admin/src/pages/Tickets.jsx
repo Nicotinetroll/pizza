@@ -74,7 +74,7 @@ const Tickets = () => {
     if (!selectedTicket || !replyText.trim()) return;
     
     try {
-      await ticketsAPI.reply(selectedTicket._id, { message: replyText });
+      await ticketsAPI.reply(selectedTicket._id || selectedTicket.ticket_number, { message: replyText });
       
       setReplyText('');
       fetchTickets();
@@ -302,26 +302,31 @@ const Tickets = () => {
           <Dialog.Title>
             Ticket {selectedTicket?.ticket_number}
           </Dialog.Title>
-          <Dialog.Description>
-            <Box mb="3">
-              <Flex gap="3" align="center">
-                <Text size="2" weight="bold">User:</Text>
-                <Text size="2">@{selectedTicket?.username} ({selectedTicket?.telegram_id})</Text>
-              </Flex>
-              <Flex gap="3" align="center" mt="2">
-                <Text size="2" weight="bold">Category:</Text>
-                <Badge>{selectedTicket?.category || 'other'}</Badge>
-              </Flex>
-              <Flex gap="3" align="center" mt="2">
-                <Text size="2" weight="bold">Priority:</Text>
-                <Badge color={priorityConfig[selectedTicket?.priority]?.color}>
-                  {priorityConfig[selectedTicket?.priority]?.label || selectedTicket?.priority}
-                </Badge>
-              </Flex>
-            </Box>
-            
-            <ScrollArea style={{ height: '300px', marginBottom: '16px' }}>
-              {selectedTicket?.messages?.map((msg, idx) => (
+          
+          <Box mb="3">
+            <Flex gap="3" align="center">
+              <Text size="2" weight="bold">User:</Text>
+              <Text size="2">@{selectedTicket?.username} ({selectedTicket?.telegram_id})</Text>
+            </Flex>
+            <Flex gap="3" align="center" mt="2">
+              <Text size="2" weight="bold">Category:</Text>
+              <Badge>{selectedTicket?.category || 'other'}</Badge>
+            </Flex>
+            <Flex gap="3" align="center" mt="2">
+              <Text size="2" weight="bold">Priority:</Text>
+              <Badge color={priorityConfig[selectedTicket?.priority]?.color}>
+                {priorityConfig[selectedTicket?.priority]?.label || selectedTicket?.priority}
+              </Badge>
+            </Flex>
+            <Flex gap="3" align="center" mt="2">
+              <Text size="2" weight="bold">Subject:</Text>
+              <Text size="2">{selectedTicket?.subject || 'No subject'}</Text>
+            </Flex>
+          </Box>
+          
+          <ScrollArea style={{ height: '300px', marginBottom: '16px' }}>
+            {selectedTicket?.messages && selectedTicket.messages.length > 0 ? (
+              selectedTicket.messages.map((msg, idx) => (
                 <Box key={idx} mb="3" style={{
                   padding: '12px',
                   borderRadius: '8px',
@@ -339,53 +344,53 @@ const Tickets = () => {
                   </Flex>
                   <Text size="2">{msg.message}</Text>
                 </Box>
-              )) || (
-                <Box p="3">
-                  <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                    {selectedTicket?.description || 'No messages yet'}
-                  </Text>
-                </Box>
-              )}
-            </ScrollArea>
-            
-            <Box mt="4">
-              <TextArea
-                placeholder="Type your reply..."
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                style={{ minHeight: '100px' }}
-              />
-              <Flex gap="3" mt="3" justify="between">
-                <Button onClick={sendReply} disabled={!replyText.trim()}>
-                  <PaperPlaneIcon />
-                  Send Reply
-                </Button>
-                <Select.Root
-                  value={selectedTicket?.status}
-                  onValueChange={(value) => {
-                    if (selectedTicket) {
-                      updateStatus(selectedTicket._id, value);
-                    }
-                  }}
-                >
-                  <Select.Trigger>
-                    <Text>Status: {selectedTicket?.status}</Text>
-                  </Select.Trigger>
-                  <Select.Content>
-                    {Object.entries(statusConfig).map(([value, config]) => (
-                      <Select.Item key={value} value={value}>
-                        {config.label}
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Root>
-              </Flex>
-            </Box>
-          </Dialog.Description>
+              ))
+            ) : (
+              <Box p="3">
+                <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                  {selectedTicket?.description || 'No messages yet'}
+                </Text>
+              </Box>
+            )}
+          </ScrollArea>
+          
+          <Box mt="4">
+            <TextArea
+              placeholder="Type your reply..."
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              style={{ minHeight: '100px' }}
+            />
+            <Flex gap="3" mt="3" justify="between">
+              <Button onClick={sendReply} disabled={!replyText.trim()}>
+                <PaperPlaneIcon />
+                Send Reply
+              </Button>
+              <Select.Root
+                value={selectedTicket?.status}
+                onValueChange={(value) => {
+                  if (selectedTicket) {
+                    updateStatus(selectedTicket._id, value);
+                  }
+                }}
+              >
+                <Select.Trigger>
+                  <Text>Status: {selectedTicket?.status}</Text>
+                </Select.Trigger>
+                <Select.Content>
+                  {Object.entries(statusConfig).map(([value, config]) => (
+                    <Select.Item key={value} value={value}>
+                      {config.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            </Flex>
+          </Box>
         </Dialog.Content>
       </Dialog.Root>
     </Box>
   );
 };
 
-export default Tickets;
+export default Tickets;ß

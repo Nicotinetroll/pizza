@@ -65,7 +65,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         category_id = data.replace("cat_", "")
         await show_category_products(update, context, category_id)
     
-    elif data.startswith("view_"):
+    elif data.startswith("view_ticket_"):
+        from .support_handlers import view_ticket
+        await view_ticket(update, context)
+    
+    elif data.startswith("view_") and not data.startswith("view_ticket_"):
         product_id = data.replace("view_", "")
         await show_product_detail(update, context, product_id)
     
