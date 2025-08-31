@@ -370,4 +370,4 @@ if __name__ == "__main__":
         logger.error(f"❌ Error: {e}")
     finally:
         loop.close()
-        logger.info("👋 Shutdown complete")ß
+        logger.info("👋 Shutdown complete")
