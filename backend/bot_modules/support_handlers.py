@@ -223,9 +223,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     state = user_ticket_state.get(user_id)
     
-    logger.info(f"Handling text message for user {user_id} in state {state}")
+    logger.info(f"=== SUPPORT TEXT HANDLER: User {user_id}, State: {state}, States dict: {user_ticket_state}")
     
     if state == ENTERING_SUBJECT:
+        logger.info(f"User {user_id} entering ticket subject")
         user = update.effective_user
         subject = update.message.text
         
@@ -235,6 +236,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         user_ticket_context[user_id]["subject"] = subject
         user_ticket_state[user_id] = ENTERING_DESCRIPTION
+        logger.info(f"Subject saved for user {user_id}: {subject}")
         
         await update.message.reply_text(
             "📝 *Describe your issue in detail:*\n\n"
@@ -243,16 +245,16 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
     elif state == ENTERING_DESCRIPTION:
+        logger.info(f"User {user_id} entering ticket description")
         user = update.effective_user
         description = update.message.text
-        
-        logger.info(f"Creating ticket for user {user_id}")
         
         if len(description) < 10:
             await update.message.reply_text("❌ Description too short. Please provide more details.")
             return
         
         ticket_data = user_ticket_context.get(user_id, {})
+        logger.info(f"Ticket data for user {user_id}: {ticket_data}")
         
         order_number = None
         for word in description.split():
@@ -263,6 +265,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         priority = TicketPriority.HIGH if "urgent" in description.lower() else TicketPriority.MEDIUM
         
         try:
+            logger.info(f"Creating ticket for user {user_id} with category: {ticket_data.get('category')}, subject: {ticket_data.get('subject')}")
+            
             ticket = await create_support_ticket(
                 telegram_id=user.id,
                 username=user.username or f"user{user.id}",
@@ -275,7 +279,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 last_name=user.last_name
             )
             
-            logger.info(f"Ticket created: {ticket['ticket_number']}")
+            logger.info(f"Ticket created successfully: {ticket['ticket_number']}")
             
             if ticket:
                 keyboard = [
@@ -304,8 +308,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         user_ticket_context.pop(user_id, None)
         user_ticket_state.pop(user_id, None)
+        logger.info(f"Cleared ticket state for user {user_id}")
         
     elif state == REPLYING_TO_TICKET:
+        logger.info(f"User {user_id} replying to ticket")
         user = update.effective_user
         message = update.message.text
         ticket_number = context.user_data.get("replying_to_ticket")
@@ -341,6 +347,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         context.user_data.pop("replying_to_ticket", None)
         user_ticket_state.pop(user_id, None)
+    else:
+        logger.warning(f"Unknown state {state} for user {user_id}")
 
 async def show_user_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id

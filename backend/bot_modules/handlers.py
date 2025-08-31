@@ -830,6 +830,8 @@ async def handle_dynamic_command(update: Update, context: ContextTypes.DEFAULT_T
             )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from .support_handlers import user_ticket_state, handle_text_message
+    
     user_id = update.effective_user.id
     username = update.effective_user.username or f"user{user_id}"
     first_name = update.effective_user.first_name
@@ -846,12 +848,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_name=last_name
     )
     
+    logger.info(f"User {user_id} sent message. Support state: {user_ticket_state.get(user_id)}, Normal state: {state}")
+    
+    if user_id in user_ticket_state:
+        logger.info(f"Processing support ticket message for user {user_id}")
+        await handle_text_message(update, context)
+        return
+    
     if state == "waiting_city":
         await handle_city_input(update, context, text)
     elif state == "waiting_referral":
         await handle_referral_input(update, context, text)
     else:
-        pass
+        logger.info(f"No state for user {user_id}, ignoring message")
 
 async def handle_city_input(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str):
     user_id = update.effective_user.id
