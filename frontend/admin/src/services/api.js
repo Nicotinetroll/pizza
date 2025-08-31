@@ -212,11 +212,13 @@ export const referralsAPI = {
 };
 
 export const ordersAPI = {
-  getAll: async () => {
-    const response = await api.get('/orders');
+  getAll: async (params = {}) => {
+    const { skip = 0, limit = 100, ...otherParams } = params;
+    const response = await api.get('/orders', {
+      params: { skip, limit, ...otherParams }
+    });
     return response.data;
   },
-
   updateStatus: async (id, status, notes = '') => {
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       throw new Error('Invalid order ID');

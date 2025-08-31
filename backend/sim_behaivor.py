@@ -17,31 +17,38 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==============================================================================
-# 🎮 KONFIGURÁCIA - NASTAV SI PODĽA POTREBY
+# 🎮 KONFIGURÁCIA 
 # ==============================================================================
 
 CONFIG = {
     # Časové nastavenia
-    "SIMULATION_DAYS": 30,           # Koľko dní dozadu simulovať
+    "SIMULATION_MODE": "last_x_days",  # Možnosti: "last_x_days", "current_month", "last_month", "custom_range"
+    "SIMULATION_DAYS": 60,             # Pre "last_x_days" mode
+    
+    # Pre "custom_range" mode:
+    "CUSTOM_START_DATE": "2025-07-01",
+    "CUSTOM_END_DATE": "2025-08-31",
+    
+    # Objednávky
     "ORDERS_PER_DAY_MIN": 5,         # Minimum objednávok za deň
     "ORDERS_PER_DAY_MAX": 25,        # Maximum objednávok za deň
     "WEEKEND_MULTIPLIER": 1.3,       # O koľko viac objednávok cez víkend
     
     # Používatelia
-    "TOTAL_USERS": 100,              # Koľko používateľov vytvoriť
-    "VIP_USER_PERCENTAGE": 0.1,      # % VIP používateľov (0.15 = 15%)
+    "TOTAL_USERS": 133,              # Koľko používateľov vytvoriť
+    "VIP_USER_PERCENTAGE": 0.15,     # % VIP používateľov (0.15 = 15%)
     "VIP_DISCOUNT_MIN": 10,          # Min VIP zľava %
     "VIP_DISCOUNT_MAX": 25,          # Max VIP zľava %
     
-    # Predajcovia a kupónys
+    # Predajcovia a kupóny
     "NUMBER_OF_SELLERS": 2,          # Koľko predajcov
     "CODES_PER_SELLER": 1,           # Koľko kupónov na predajcu
-    "SELLER_COMMISSION_MIN": 10,     # Min provízia %
-    "SELLER_COMMISSION_MAX": 30,     # Max provízia %
+    "SELLER_COMMISSION_MIN": 20,     # Min provízia %
+    "SELLER_COMMISSION_MAX": 35,     # Max provízia %
     "REFERRAL_USAGE_RATE": 0.35,     # % objednávok s kupónom (0.35 = 35%)
     "DISCOUNT_VALUES": [5, 10, 15, 20],  # Možné hodnoty zliav
     
-    # Objednávky
+    # Objednávky detaily
     "ITEMS_PER_ORDER_MIN": 1,        # Min produktov v objednávke
     "ITEMS_PER_ORDER_MAX": 5,        # Max produktov v objednávke
     "QUANTITY_PER_ITEM_MAX": 3,      # Max kusov jedného produktu
@@ -64,7 +71,7 @@ CONFIG = {
     
     # Seller payouts
     "GENERATE_PAYOUTS": True,        # Či generovať výplaty pre sellers
-    "PAYOUT_PERCENTAGE": 0,        # Koľko % z earnings vyplatiť (0.7 = 70%)
+    "PAYOUT_PERCENTAGE": 0.7,        # Koľko % z earnings vyplatiť (0.7 = 70%)
 }
 
 # Dátové pooly pre generovanie
@@ -246,18 +253,40 @@ async def create_users():
     return users
 
 async def generate_orders(users, products, referral_codes):
-    """Generuj objednávky"""
-    print(f"📦 Generovanie objednávok za {CONFIG['SIMULATION_DAYS']} dní...")
+    """Generuj objednávky podľa zvoleného módu"""
+    print(f"📦 Generovanie objednávok...")
     
     if not products:
         print("❌ Žiadne produkty!")
         return
     
+    # Určenie časového rozsahu podľa módu
+    if CONFIG["SIMULATION_MODE"] == "current_month":
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        simulation_days = (end_date - start_date).days + 1
+        
+    elif CONFIG["SIMULATION_MODE"] == "last_month":
+        end_date = datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        simulation_days = (end_date - start_date).days + 1
+        
+    elif CONFIG["SIMULATION_MODE"] == "custom_range":
+        start_date = datetime.fromisoformat(CONFIG["CUSTOM_START_DATE"]).replace(tzinfo=timezone.utc)
+        end_date = datetime.fromisoformat(CONFIG["CUSTOM_END_DATE"]).replace(tzinfo=timezone.utc)
+        simulation_days = (end_date - start_date).days + 1
+        
+    else:  # "last_x_days"
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=CONFIG['SIMULATION_DAYS'])
+        simulation_days = CONFIG['SIMULATION_DAYS']
+    
+    print(f"📅 Obdobie: {start_date.strftime('%Y-%m-%d')} až {end_date.strftime('%Y-%m-%d')} ({simulation_days} dní)")
+    
     total_orders = 0
     total_revenue = 0
-    start_date = datetime.now(timezone.utc) - timedelta(days=CONFIG['SIMULATION_DAYS'])
     
-    for day in range(CONFIG['SIMULATION_DAYS']):
+    for day in range(simulation_days):
         current_date = start_date + timedelta(days=day)
         
         # Víkendový bonus
@@ -370,7 +399,7 @@ async def generate_orders(users, products, referral_codes):
             total_orders += 1
             daily_revenue += total if status in ["completed", "paid", "processing"] else 0
         
-        print(f"  Deň {day + 1:2d}: {base_orders:2d} objednávok, ${daily_revenue:.2f} tržby")
+        print(f"  Deň {day + 1:2d} ({current_date.strftime('%Y-%m-%d')}): {base_orders:2d} objednávok, ${daily_revenue:.2f}")
         total_revenue += daily_revenue
     
     # Aktualizuj štatistiky
@@ -378,7 +407,8 @@ async def generate_orders(users, products, referral_codes):
     
     print(f"\n✅ Vygenerovaných {total_orders} objednávok")
     print(f"💰 Celkové tržby: ${total_revenue:,.2f}")
-    print(f"💵 Priemerná objednávka: ${total_revenue/total_orders:.2f}")
+    if total_orders > 0:
+        print(f"💵 Priemerná objednávka: ${total_revenue/total_orders:.2f}")
 
 async def update_statistics():
     """Aktualizuj štatistiky používateľov a produktov"""
@@ -508,7 +538,9 @@ async def main():
     print("🚀 AnabolicPizza - Konfigurovateľný Test Data Generator")
     print("="*60)
     print("📋 Aktuálna konfigurácia:")
-    print(f"  • {CONFIG['SIMULATION_DAYS']} dní simulácie")
+    print(f"  • Mód: {CONFIG['SIMULATION_MODE']}")
+    if CONFIG['SIMULATION_MODE'] == 'last_x_days':
+        print(f"  • {CONFIG['SIMULATION_DAYS']} dní simulácie")
     print(f"  • {CONFIG['ORDERS_PER_DAY_MIN']}-{CONFIG['ORDERS_PER_DAY_MAX']} objednávok/deň")
     print(f"  • {CONFIG['TOTAL_USERS']} používateľov ({int(CONFIG['VIP_USER_PERCENTAGE']*100)}% VIP)")
     print(f"  • {CONFIG['NUMBER_OF_SELLERS']} predajcov")
