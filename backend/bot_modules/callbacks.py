@@ -69,6 +69,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from .support_handlers import view_ticket
         await view_ticket(update, context)
     
+    elif data.startswith("reply_ticket_"):
+        from .support_handlers import handle_ticket_reply
+        await handle_ticket_reply(update, context)
+    
+    elif data.startswith("resolve_ticket_"):
+        from .support_handlers import handle_ticket_reply
+        await handle_ticket_reply(update, context)
+    
+    elif data.startswith("view_") and not data.startswith("view_ticket_"):
+        product_id = data.replace("view_", "")
+        await show_product_detail(update, context, product_id)
+    
+    elif data == "my_tickets":
+        from .support_handlers import show_user_tickets
+        await show_user_tickets(update, context)
+    
+    elif data == "create_ticket":
+        from .support_handlers import support_command
+        await support_command(update, context)
+    
     elif data.startswith("view_") and not data.startswith("view_ticket_"):
         product_id = data.replace("view_", "")
         await show_product_detail(update, context, product_id)
