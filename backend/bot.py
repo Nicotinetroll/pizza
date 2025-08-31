@@ -16,10 +16,7 @@ from bot_modules.support_handlers import (
     mytickets_command,
     closeticket_command,
     view_ticket,
-    handle_ticket_reply,
-    admin_take_ticket,
-    admin_view_ticket,
-    admin_reply_ticket
+    handle_ticket_reply
 )
 
 try:
@@ -287,10 +284,6 @@ def main():
         application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^reply_ticket_"))
         application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^resolve_ticket_"))
         
-        application.add_handler(CallbackQueryHandler(admin_take_ticket, pattern="^admin_take_"))
-        application.add_handler(CallbackQueryHandler(admin_view_ticket, pattern="^admin_view_"))
-        application.add_handler(CallbackQueryHandler(admin_reply_ticket, pattern="^admin_reply_"))
-        
         application.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
             handle_message
@@ -377,4 +370,4 @@ if __name__ == "__main__":
         logger.error(f"❌ Error: {e}")
     finally:
         loop.close()
-        logger.info("👋 Shutdown complete")
+        logger.info("👋 Shutdown complete")ß
