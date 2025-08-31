@@ -26,6 +26,7 @@ import Chat from './pages/Chat';
 import BotSettings from './pages/BotSettings';
 import CustomerRequests from './pages/CustomerRequests';
 import Payouts from './pages/Payouts';
+import Tickets from './pages/Tickets';
 
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, color: '#8b5cf6', mobileShow: true },
@@ -38,6 +39,7 @@ const navigationItems = [
   { id: 'users', label: 'Users', icon: PersonIcon, color: '#6366f1', mobileShow: false },
   { id: 'chat', label: 'Chat', icon: ChatBubbleIcon, color: '#ec4899', mobileShow: false },
   { id: 'requests', label: 'Requests', icon: ExclamationTriangleIcon, color: '#ef4444', mobileShow: false },
+  { id: 'tickets', label: 'Tickets', icon: ChatBubbleIcon, color: '#ef4444', mobileShow: false },
   { id: 'notifications', label: 'Notifs', icon: BellIcon, color: '#f59e0b', mobileShow: false },
   { id: 'botsettings', label: 'Bot Settings', icon: GearIcon, color: '#06b6d4', mobileShow: false },
 ];
@@ -413,6 +415,7 @@ const MainApp = () => {
       users: Users,
       chat: Chat,
       requests: CustomerRequests,
+      tickets: Tickets,
       notifications: Notifications,
       botsettings: BotSettings,
     };
