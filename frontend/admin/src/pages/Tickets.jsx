@@ -378,7 +378,7 @@ const TicketDetailModal = ({ ticket, isOpen, onClose, onStatusUpdate, onDelete, 
           </Flex>
         </Dialog.Title>
 
-        <Dialog.Description>
+        <Box>
           <ScrollArea style={{ maxHeight: isMobile ? '60vh' : '60vh' }}>
             <Flex direction="column" gap={isMobile ? '3' : '4'} mt={isMobile ? '3' : '4'}>
               <Card style={{
@@ -549,7 +549,7 @@ const TicketDetailModal = ({ ticket, isOpen, onClose, onStatusUpdate, onDelete, 
               </Card>
             </Flex>
           </ScrollArea>
-        </Dialog.Description>
+        </Box>
 
         <Flex gap="3" mt={isMobile ? '4' : '6'} justify="space-between">
           <Button 
