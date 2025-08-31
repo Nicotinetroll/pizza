@@ -10,6 +10,7 @@ import {
   ExclamationTriangleIcon, PersonIcon, CalendarIcon, ReloadIcon,
   MagnifyingGlassIcon, PaperPlaneIcon, DotsHorizontalIcon
 } from '@radix-ui/react-icons';
+import { ticketsAPI } from '../services/api';
 
 const statusConfig = {
   open: { color: 'amber', icon: ClockIcon, label: 'Open' },
@@ -46,19 +47,15 @@ const Tickets = () => {
   const fetchTickets = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (statusFilter !== 'all') params.append('status', statusFilter);
-      if (priorityFilter !== 'all') params.append('priority', priorityFilter);
+      const params = {};
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (priorityFilter !== 'all') params.priority = priorityFilter;
       
-      const response = await fetch(`/api/tickets?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      const data = await response.json();
+      const data = await ticketsAPI.getAll(params);
       setTickets(data.tickets || []);
     } catch (error) {
       console.error('Error fetching tickets:', error);
+      setTickets([]);
     } finally {
       setLoading(false);
     }
@@ -66,12 +63,7 @@ const Tickets = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/tickets/stats/overview', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      const data = await response.json();
+      const data = await ticketsAPI.getStats();
       setStats(data);
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -82,29 +74,20 @@ const Tickets = () => {
     if (!selectedTicket || !replyText.trim()) return;
     
     try {
-      const response = await fetch(`/api/tickets/${selectedTicket._id}/reply`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ message: replyText })
-      });
+      await ticketsAPI.reply(selectedTicket._id, { message: replyText });
       
-      if (response.ok) {
-        setReplyText('');
-        fetchTickets();
-        
-        if (selectedTicket.messages) {
-          setSelectedTicket({
-            ...selectedTicket,
-            messages: [...selectedTicket.messages, {
-              sender_type: 'admin',
-              message: replyText,
-              timestamp: new Date().toISOString()
-            }]
-          });
-        }
+      setReplyText('');
+      fetchTickets();
+      
+      if (selectedTicket.messages) {
+        setSelectedTicket({
+          ...selectedTicket,
+          messages: [...selectedTicket.messages, {
+            sender_type: 'admin',
+            message: replyText,
+            timestamp: new Date().toISOString()
+          }]
+        });
       }
     } catch (error) {
       console.error('Error sending reply:', error);
@@ -113,20 +96,11 @@ const Tickets = () => {
 
   const updateStatus = async (ticketId, newStatus) => {
     try {
-      const response = await fetch(`/api/tickets/${ticketId}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ status: newStatus })
-      });
+      await ticketsAPI.updateStatus(ticketId, { status: newStatus });
       
-      if (response.ok) {
-        fetchTickets();
-        if (selectedTicket && selectedTicket._id === ticketId) {
-          setSelectedTicket({...selectedTicket, status: newStatus});
-        }
+      fetchTickets();
+      if (selectedTicket && selectedTicket._id === ticketId) {
+        setSelectedTicket({...selectedTicket, status: newStatus});
       }
     } catch (error) {
       console.error('Error updating status:', error);

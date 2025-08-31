@@ -16,7 +16,10 @@ from bot_modules.support_handlers import (
     mytickets_command,
     closeticket_command,
     view_ticket,
-    handle_ticket_reply
+    handle_ticket_reply,
+    admin_take_ticket,
+    admin_view_ticket,
+    admin_reply_ticket
 )
 
 try:
@@ -33,7 +36,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def start_background_tasks():
-    """Start background tasks for the bot"""
     if ANIMATION_SUPPORT and cleanup_old_messages:
         asyncio.create_task(cleanup_old_messages())
         logger.info("✅ Started message cleanup background task for smooth animations")
@@ -157,7 +159,11 @@ async def register_dynamic_commands(application):
         )
         application.add_handler(requests_handler)
         
-        logger.info(f"✅ Registration complete: {len(registered_commands) + 4} commands")
+        application.add_handler(get_support_conversation_handler())
+        application.add_handler(CommandHandler("mytickets", mytickets_command))
+        application.add_handler(CommandHandler("closeticket", closeticket_command))
+        
+        logger.info(f"✅ Registration complete: {len(registered_commands) + 6} commands including /support")
         return True
         
     except Exception as e:
@@ -206,16 +212,8 @@ def register_fallback_commands(application):
     application.add_handler(get_support_conversation_handler())
     application.add_handler(CommandHandler("mytickets", mytickets_command))
     application.add_handler(CommandHandler("closeticket", closeticket_command))
-    application.add_handler(CallbackQueryHandler(view_ticket, pattern="^view_ticket_"))
-    application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^reply_ticket_"))
-    application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^resolve_ticket_"))
-
-    # Pridaj aj admin handlery pre skupinu
-    application.add_handler(CallbackQueryHandler(admin_take_ticket, pattern="^admin_take_"))
-    application.add_handler(CallbackQueryHandler(admin_view_ticket, pattern="^admin_view_"))
-    application.add_handler(CallbackQueryHandler(admin_reply_ticket, pattern="^admin_reply_"))
     
-    logger.info("Registered 6 fallback commands (/start, /help, /clear, /request, /closerequest, /requests)")
+    logger.info("Registered 9 fallback commands including /support")
 
 async def post_init(application):
     try:
@@ -231,14 +229,12 @@ async def post_init(application):
             logger.warning("⚠️ Failed to load commands, using minimal fallback")
             register_fallback_commands(application)
         
-        # Start background tasks for smooth animations
         await start_background_tasks()
         
         settings = await message_loader.load_settings()
         if settings.get('maintenance_mode'):
             logger.warning(f"⚠️ MAINTENANCE MODE: {settings.get('maintenance_message')}")
         
-        # Initialize payment gateway if available
         try:
             import os
             from dotenv import load_dotenv
@@ -287,6 +283,14 @@ def main():
         
         application.add_handler(CallbackQueryHandler(handle_callback))
         
+        application.add_handler(CallbackQueryHandler(view_ticket, pattern="^view_ticket_"))
+        application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^reply_ticket_"))
+        application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^resolve_ticket_"))
+        
+        application.add_handler(CallbackQueryHandler(admin_take_ticket, pattern="^admin_take_"))
+        application.add_handler(CallbackQueryHandler(admin_view_ticket, pattern="^admin_view_"))
+        application.add_handler(CallbackQueryHandler(admin_reply_ticket, pattern="^admin_reply_"))
+        
         application.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
             handle_message
@@ -306,12 +310,13 @@ def main():
             logger.info("📅 Auto-reload scheduled every 5 minutes")
         
         logger.info("="*60)
-        logger.info("🍕💪 AnabolicPizza Bot - WITH SMOOTH ANIMATIONS")
-        logger.info("🔧 Dynamic Loading + Clear Chat + Product Requests")
+        logger.info("🍕💪 AnabolicPizza Bot - WITH SUPPORT SYSTEM")
+        logger.info("🔧 Dynamic Loading + Clear Chat + Product Requests + Support Tickets")
         logger.info("💫 Smooth payment status animations enabled!")
         logger.info("✅ Buttons will work after restart!")
         logger.info("🧹 /clear command enabled")
         logger.info("📝 /request, /closerequest, /requests enabled")
+        logger.info("🎫 /support, /mytickets, /closeticket enabled")
         logger.info("🔄 Auto-reload: 5 minutes")
         if ANIMATION_SUPPORT:
             logger.info("🎬 Animation support: ACTIVE")
@@ -347,10 +352,11 @@ if __name__ == "__main__":
                 commands = await db.bot_commands.find({}).to_list(100)
                 logger.info(f"📋 Found {len(commands)} commands in database")
                 
-                # Check for payment records collection
                 collections = await db.list_collection_names()
                 if "payment_records" in collections:
                     logger.info("💳 Payment records collection found")
+                if "support_tickets" in collections:
+                    logger.info("🎫 Support tickets collection found")
                 
                 return True
             except Exception as e:
