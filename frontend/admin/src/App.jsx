@@ -12,7 +12,7 @@ import {
   BellIcon, ChatBubbleIcon, GearIcon, ExclamationTriangleIcon
 } from '@radix-ui/react-icons';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { customOrdersAPI } from './services/api';
+import { customOrdersAPI, ticketsAPI } from './services/api';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
@@ -123,7 +123,7 @@ const SecurityStatus = () => {
   );
 };
 
-const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages, unreadRequests }) => {
+const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages, unreadRequests, unreadTickets }) => {
   const [showMore, setShowMore] = useState(false);
 
   const primaryItems = navigationItems.filter(item => item.mobileShow);
@@ -176,7 +176,8 @@ const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages, unreadReques
                       const Icon = item.icon;
                       const isActive = activeTab === item.id;
                       const hasUnread = (item.id === 'chat' && unreadMessages > 0) ||
-                          (item.id === 'requests' && unreadRequests > 0);
+                          (item.id === 'requests' && unreadRequests > 0) ||
+                          (item.id === 'tickets' && unreadTickets > 0);
 
                       return (
                           <Button
@@ -311,7 +312,7 @@ const MobileBottomNav = ({ activeTab, setActiveTab, unreadMessages, unreadReques
                         height="20"
                         style={{ color: 'rgba(255, 255, 255, 0.6)' }}
                     />
-                    {(unreadMessages > 0 || unreadRequests > 0) && (
+                    {(unreadMessages > 0 || unreadRequests > 0 || unreadTickets > 0) && (
                         <Box style={{
                           position: 'absolute',
                           top: '-2px',
@@ -339,6 +340,7 @@ const MainApp = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [unreadRequests, setUnreadRequests] = useState(0);
+  const [unreadTickets, setUnreadTickets] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const { isAuthenticated, logout, user } = useAuth();
 
@@ -381,15 +383,27 @@ const MainApp = () => {
     }
   };
 
+  const fetchUnreadTickets = async () => {
+    try {
+      const response = await ticketsAPI.getStats();
+      const openTickets = (response.open || 0) + (response.waiting_admin || 0);
+      setUnreadTickets(openTickets);
+    } catch (error) {
+      console.error('Error fetching unread tickets:', error);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated) return;
 
     fetchUnreadCount();
     fetchUnreadRequests();
+    fetchUnreadTickets();
 
     const interval = setInterval(() => {
       fetchUnreadCount();
       fetchUnreadRequests();
+      fetchUnreadTickets();
     }, 30000);
 
     return () => clearInterval(interval);
@@ -489,6 +503,11 @@ const MainApp = () => {
                       {unreadRequests}
                     </Badge>
                 )}
+                {activeTab === 'tickets' && unreadTickets > 0 && (
+                    <Badge size="1" color="red" style={{ marginLeft: '8px' }}>
+                      {unreadTickets}
+                    </Badge>
+                )}
               </Flex>
 
               <DropdownMenu.Root>
@@ -541,6 +560,7 @@ const MainApp = () => {
               setActiveTab={setActiveTab}
               unreadMessages={unreadMessages}
               unreadRequests={unreadRequests}
+              unreadTickets={unreadTickets}
           />
         </Box>
     );
@@ -632,8 +652,13 @@ const MainApp = () => {
                     const isActive = activeTab === item.id;
                     const isChat = item.id === 'chat';
                     const isRequests = item.id === 'requests';
-                    const hasUnread = (isChat && unreadMessages > 0) || (isRequests && unreadRequests > 0);
-                    const unreadCount = isChat ? unreadMessages : isRequests ? unreadRequests : 0;
+                    const isTickets = item.id === 'tickets';
+                    const hasUnread = (isChat && unreadMessages > 0) || 
+                                     (isRequests && unreadRequests > 0) ||
+                                     (isTickets && unreadTickets > 0);
+                    const unreadCount = isChat ? unreadMessages : 
+                                       isRequests ? unreadRequests : 
+                                       isTickets ? unreadTickets : 0;
 
                     return (
                         <Box key={item.id} style={{ position: 'relative' }}>
@@ -654,14 +679,10 @@ const MainApp = () => {
                                   minHeight: '44px',
                                   background: isActive
                                       ? `linear-gradient(135deg, ${item.color}20 0%, ${item.color}10 100%)`
-                                      : hasUnread
-                                          ? `${item.color}15`
-                                          : 'transparent',
+                                      : 'transparent',
                                   border: isActive
                                       ? `1px solid ${item.color}40`
-                                      : hasUnread
-                                          ? `1px solid ${item.color}30`
-                                          : '1px solid transparent',
+                                      : '1px solid transparent',
                                   color: isActive ? item.color : 'rgba(255, 255, 255, 0.7)',
                                   position: 'relative',
                                   overflow: 'hidden',
@@ -837,6 +858,11 @@ const MainApp = () => {
                     {activeTab === 'requests' && unreadRequests > 0 && (
                         <Badge size="2" color="red">
                           {unreadRequests} pending
+                        </Badge>
+                    )}
+                    {activeTab === 'tickets' && unreadTickets > 0 && (
+                        <Badge size="2" color="red">
+                          {unreadTickets} open
                         </Badge>
                     )}
                     <Box style={{ opacity: 0.6 }}>
