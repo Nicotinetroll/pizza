@@ -26,6 +26,9 @@ logs/
 *.log
 
 
+# Media
+Media/
+
 
 # Backups
 
