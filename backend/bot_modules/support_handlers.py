@@ -41,7 +41,7 @@ async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = (
         "🎫 *SUPPORT CENTER*\n\n"
-        "Need help? Create a support ticket!\n\n"
+        "Need help? Ticket us, bro. It won’t fix your chicken legs, but at least it solves your problem.\n\n"
         "Select category for your issue:"
     )
     
@@ -70,7 +70,7 @@ async def handle_category_selection_callback(update: Update, context: ContextTyp
     
     await query.edit_message_text(
         f"📝 *Creating Ticket - {category.upper()}*\n\n"
-        "Please enter a brief subject for your ticket:",
+        "Keep it short",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -99,7 +99,7 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = (
         "🎫 *SUPPORT CENTER*\n\n"
-        "Need help? Create a support ticket!\n\n"
+        "Need help? Ticket us, bro. It won’t fix your chicken legs, but at least it solves your problem.\n\n"
         "Select category for your issue:"
     )
     
@@ -130,7 +130,7 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
     
     await query.edit_message_text(
         f"📝 *Creating Ticket - {category.upper()}*\n\n"
-        "Please enter a brief subject for your ticket:",
+        "Keep it short",
         parse_mode=ParseMode.MARKDOWN
     )
     
