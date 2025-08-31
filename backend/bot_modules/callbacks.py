@@ -105,6 +105,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data.startswith("check_pay_"):
         await handle_check_payment(update, context, data)
+        
+    elif data == "support_menu":
+        from .support_handlers import show_support_menu
+        await show_support_menu(update, context)
     
     elif data == "support":
         support_text = """

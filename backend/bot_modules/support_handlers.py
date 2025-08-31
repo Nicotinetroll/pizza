@@ -6,13 +6,44 @@ import logging
 
 from .support_tickets import *
 from .database import db
-from .config import MESSAGES
 
 logger = logging.getLogger(__name__)
 
 SELECTING_CATEGORY, ENTERING_SUBJECT, ENTERING_DESCRIPTION, REPLYING_TO_TICKET = range(4)
 
 user_ticket_context = {}
+
+async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("🚚 Order Issue", callback_data="ticket_cat_order"),
+            InlineKeyboardButton("💳 Payment", callback_data="ticket_cat_payment")
+        ],
+        [
+            InlineKeyboardButton("📦 Product", callback_data="ticket_cat_product"),
+            InlineKeyboardButton("🌍 Delivery", callback_data="ticket_cat_delivery")
+        ],
+        [
+            InlineKeyboardButton("🔧 Technical", callback_data="ticket_cat_technical"),
+            InlineKeyboardButton("❓ Other", callback_data="ticket_cat_other")
+        ],
+        [InlineKeyboardButton("📋 My Tickets", callback_data="my_tickets")],
+        [InlineKeyboardButton("🏠 Back to Menu", callback_data="home")]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    text = (
+        "🎫 *SUPPORT CENTER*\n\n"
+        "Need help? Create a support ticket!\n\n"
+        "Select category for your issue:"
+    )
+    
+    await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+    return SELECTING_CATEGORY
 
 async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -30,7 +61,8 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🔧 Technical", callback_data="ticket_cat_technical"),
             InlineKeyboardButton("❓ Other", callback_data="ticket_cat_other")
         ],
-        [InlineKeyboardButton("📋 My Tickets", callback_data="my_tickets")]
+        [InlineKeyboardButton("📋 My Tickets", callback_data="my_tickets")],
+        [InlineKeyboardButton("🏠 Back to Menu", callback_data="home")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -56,6 +88,11 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
     
     if query.data == "my_tickets":
         await show_user_tickets(update, context)
+        return ConversationHandler.END
+    
+    if query.data == "home":
+        from .handlers import start_command
+        await start_command(update, context)
         return ConversationHandler.END
     
     category = query.data.replace("ticket_cat_", "")
@@ -88,9 +125,10 @@ async def handle_subject_input(update: Update, context: ContextTypes.DEFAULT_TYP
     return ENTERING_DESCRIPTION
 
 async def handle_description_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Starting ticket creation for user {user.id}")
     user = update.effective_user
     description = update.message.text
+    
+    logger.info(f"Starting ticket creation for user {user.id}")
     
     if len(description) < 10:
         await update.message.reply_text("❌ Description too short. Please provide more details.")
@@ -106,42 +144,45 @@ async def handle_description_input(update: Update, context: ContextTypes.DEFAULT
     
     priority = TicketPriority.HIGH if "urgent" in description.lower() else TicketPriority.MEDIUM
     
-    ticket = await create_support_ticket(
-        telegram_id=user.id,
-        username=user.username or f"user{user.id}",
-        category=ticket_data.get("category", "other"),
-        subject=ticket_data.get("subject", "No subject"),
-        description=description,
-        order_number=order_number,
-        priority=priority,
-        first_name=user.first_name,
-        last_name=user.last_name
-    )
-    
-    logger.info(f"Ticket created: {ticket}")
-    if not ticket:
-        logger.error("Ticket creation returned None!")
-        await update.message.reply_text("❌ Failed to create ticket. Please try again.")
-        return ConversationHandler.END
-    
-    logger.info("Attempting to send to admin group...")
-    await send_ticket_to_admin_group(ticket, context)
-    logger.info("Admin group notification sent")
-    
-    keyboard = [
-        [InlineKeyboardButton("📋 View My Tickets", callback_data="my_tickets")],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
-    ]
-    
-    await update.message.reply_text(
-        f"✅ *Ticket Created Successfully!*\n\n"
-        f"Ticket ID: `{ticket['ticket_number']}`\n"
-        f"Status: 🟡 Open\n\n"
-        f"We'll respond within 2-4 hours.\n"
-        f"You'll be notified when admin replies.",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    try:
+        ticket = await create_support_ticket(
+            telegram_id=user.id,
+            username=user.username or f"user{user.id}",
+            category=ticket_data.get("category", "other"),
+            subject=ticket_data.get("subject", "No subject"),
+            description=description,
+            order_number=order_number,
+            priority=priority,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+        logger.info(f"Ticket created: {ticket['ticket_number']}")
+        
+        if ticket:
+            keyboard = [
+                [InlineKeyboardButton("📋 View My Tickets", callback_data="my_tickets")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+            ]
+            
+            await update.message.reply_text(
+                f"✅ *Ticket Created Successfully!*\n\n"
+                f"Ticket ID: `{ticket['ticket_number']}`\n"
+                f"Status: 🟡 Open\n\n"
+                f"We'll respond within 2-4 hours.\n"
+                f"You'll be notified when admin replies.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            logger.error("Ticket creation returned None!")
+            await update.message.reply_text("❌ Failed to create ticket. Please try again.")
+            
+    except Exception as e:
+        logger.error(f"Error creating ticket: {e}")
+        import traceback
+        traceback.print_exc()
+        await update.message.reply_text("❌ An error occurred while creating the ticket. Please try again.")
     
     user_ticket_context.pop(user.id, None)
     return ConversationHandler.END
@@ -153,7 +194,7 @@ async def show_user_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not tickets:
         text = "📋 *Your Support Tickets*\n\nYou have no tickets yet."
-        keyboard = [[InlineKeyboardButton("🎫 Create Ticket", callback_data="create_ticket")]]
+        keyboard = [[InlineKeyboardButton("🎫 Create Ticket", callback_data="support_menu")]]
     else:
         text = "📋 *Your Support Tickets*\n\n"
         keyboard = []
@@ -182,7 +223,7 @@ async def show_user_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             ])
         
-        keyboard.append([InlineKeyboardButton("🎫 Create New Ticket", callback_data="create_ticket")])
+        keyboard.append([InlineKeyboardButton("🎫 Create New Ticket", callback_data="support_menu")])
     
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="home")])
     
@@ -307,17 +348,6 @@ async def process_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        
-        settings = await db.bot_settings.find_one({"_id": "main"})
-        if settings and settings.get("admin_group_id"):
-            try:
-                await context.bot.send_message(
-                    chat_id=settings["admin_group_id"],
-                    text=f"💬 New reply in ticket `{ticket_number}` from @{user.username}:\n\n{message[:200]}",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except:
-                pass
     else:
         await update.message.reply_text("❌ Failed to add reply.")
     
@@ -363,85 +393,15 @@ async def closeticket_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 def get_support_conversation_handler():
     return ConversationHandler(
-        entry_points=[CommandHandler('support', support_command)],
+        entry_points=[
+            CommandHandler('support', support_command),
+            CallbackQueryHandler(show_support_menu, pattern="^support_menu$")
+        ],
         states={
-            SELECTING_CATEGORY: [CallbackQueryHandler(handle_category_selection, pattern="^ticket_cat_|my_tickets$")],
+            SELECTING_CATEGORY: [CallbackQueryHandler(handle_category_selection, pattern="^ticket_cat_|my_tickets$|home$")],
             ENTERING_SUBJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_subject_input)],
             ENTERING_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_description_input)],
             REPLYING_TO_TICKET: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_ticket_reply)]
         },
         fallbacks=[CommandHandler('cancel', lambda u, c: ConversationHandler.END)]
-    )
-
-async def admin_take_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    ticket_number = query.data.replace("admin_take_", "")
-    ticket = await get_ticket_by_number(ticket_number)
-    
-    if not ticket:
-        await query.edit_message_text("❌ Ticket not found.")
-        return
-    
-    admin = update.effective_user
-    success = await assign_ticket(
-        ticket["_id"],
-        admin.id,
-        admin.username or f"Admin{admin.id}"
-    )
-    
-    if success:
-        await query.edit_message_text(
-            f"✅ Ticket {ticket_number} assigned to @{admin.username}\n\n"
-            f"Original message:\n{ticket['description'][:500]}",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        try:
-            await context.bot.send_message(
-                chat_id=ticket["telegram_id"],
-                text=f"ℹ️ Your ticket {ticket_number} has been assigned to an admin and is being reviewed.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-        except:
-            pass
-
-async def admin_view_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    ticket_number = query.data.replace("admin_view_", "")
-    ticket = await get_ticket_by_number(ticket_number)
-    
-    if not ticket:
-        await query.edit_message_text("❌ Ticket not found.")
-        return
-    
-    text = (
-        f"📋 *Ticket {ticket['ticket_number']}*\n\n"
-        f"👤 User: @{ticket['username']} ({ticket['telegram_id']})\n"
-        f"📂 Category: {ticket['category'].upper()}\n"
-        f"📝 Subject: {ticket['subject']}\n"
-        f"🕐 Created: {ticket['created_at'].strftime('%Y-%m-%d %H:%M')}\n\n"
-        f"💬 *Full Conversation:*\n\n"
-    )
-    
-    for msg in ticket.get("messages", []):
-        sender = f"@{ticket['username']}" if msg["sender_type"] == "customer" else "Admin"
-        time = msg["timestamp"].strftime("%H:%M")
-        text += f"*{sender}* ({time}):\n{msg['message']}\n\n"
-    
-    await query.edit_message_text(text[:4000], parse_mode=ParseMode.MARKDOWN)
-
-async def admin_reply_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    ticket_number = query.data.replace("admin_reply_", "")
-    
-    await query.edit_message_text(
-        f"To reply to ticket {ticket_number}, use:\n\n"
-        f"`/adminreply {ticket_number} Your message here`",
-        parse_mode=ParseMode.MARKDOWN
     )

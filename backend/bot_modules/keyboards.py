@@ -5,14 +5,14 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from typing import List, Dict, Optional
 from .config import EU_COUNTRIES, CRYPTO_CURRENCIES
 
-def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Get main menu keyboard with emojis"""
+def get_main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🍕 Browse Shop", callback_data="shop")],
         [
             InlineKeyboardButton("🛒 My Cart", callback_data="cart"),
             InlineKeyboardButton("📦 My Orders", callback_data="orders")
         ],
+        [InlineKeyboardButton("🎫 Support", callback_data="support_menu")],
         [InlineKeyboardButton("❓ Help & Info", callback_data="help")]
     ])
 
