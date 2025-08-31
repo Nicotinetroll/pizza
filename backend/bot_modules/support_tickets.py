@@ -342,4 +342,3 @@ async def auto_close_resolved_tickets(days: int = 7):
     )
     
     return result.modified_count
-ß
