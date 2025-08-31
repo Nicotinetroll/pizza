@@ -88,6 +88,7 @@ async def handle_subject_input(update: Update, context: ContextTypes.DEFAULT_TYP
     return ENTERING_DESCRIPTION
 
 async def handle_description_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Starting ticket creation for user {user.id}")
     user = update.effective_user
     description = update.message.text
     
@@ -117,7 +118,15 @@ async def handle_description_input(update: Update, context: ContextTypes.DEFAULT
         last_name=user.last_name
     )
     
+    logger.info(f"Ticket created: {ticket}")
+    if not ticket:
+        logger.error("Ticket creation returned None!")
+        await update.message.reply_text("❌ Failed to create ticket. Please try again.")
+        return ConversationHandler.END
+    
+    logger.info("Attempting to send to admin group...")
     await send_ticket_to_admin_group(ticket, context)
+    logger.info("Admin group notification sent")
     
     keyboard = [
         [InlineKeyboardButton("📋 View My Tickets", callback_data="my_tickets")],
