@@ -1,9 +1,9 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = '/api';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = '/api';
 
 const api = axios.create({
   baseURL: API_URL,
