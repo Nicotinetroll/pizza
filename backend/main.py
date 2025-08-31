@@ -15,6 +15,7 @@ from main_modules.endpoints_notification_media import router_notification_media
 from main_modules.helpers import setup_chat_indexes
 from main_modules import endpoints_payouts
 from main_modules.endpoints_notifications import router as router_notifications
+from main_modules.endpoints_tickets import router_tickets
 
 load_dotenv()
 
@@ -76,6 +77,8 @@ app.include_router(router_chat_admin)
 app.include_router(router_notification_media)
 app.include_router(endpoints_payouts.router)
 app.include_router(router_notifications)
+app.include_router(router_tickets)
+
 
 try:
     from main_modules.endpoints_payments import router_payments

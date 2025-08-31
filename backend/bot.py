@@ -11,8 +11,14 @@ from bot_modules.handlers import (
     request_command, closerequest_command, requests_command, clear_command
 )
 from bot_modules.callbacks import handle_callback
+from bot_modules.support_handlers import (
+    get_support_conversation_handler,
+    mytickets_command,
+    closeticket_command,
+    view_ticket,
+    handle_ticket_reply
+)
 
-# Import the message updater for smooth animations
 try:
     from bot_modules.message_updater import cleanup_old_messages
     ANIMATION_SUPPORT = True
@@ -196,6 +202,18 @@ def register_fallback_commands(application):
         requests_command,
         filters=filters.ChatType.PRIVATE
     ))
+    
+    application.add_handler(get_support_conversation_handler())
+    application.add_handler(CommandHandler("mytickets", mytickets_command))
+    application.add_handler(CommandHandler("closeticket", closeticket_command))
+    application.add_handler(CallbackQueryHandler(view_ticket, pattern="^view_ticket_"))
+    application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^reply_ticket_"))
+    application.add_handler(CallbackQueryHandler(handle_ticket_reply, pattern="^resolve_ticket_"))
+
+    # Pridaj aj admin handlery pre skupinu
+    application.add_handler(CallbackQueryHandler(admin_take_ticket, pattern="^admin_take_"))
+    application.add_handler(CallbackQueryHandler(admin_view_ticket, pattern="^admin_view_"))
+    application.add_handler(CallbackQueryHandler(admin_reply_ticket, pattern="^admin_reply_"))
     
     logger.info("Registered 6 fallback commands (/start, /help, /clear, /request, /closerequest, /requests)")
 
