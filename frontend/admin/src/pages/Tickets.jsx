@@ -1,5 +1,3 @@
-// frontend/admin/src/pages/Tickets.jsx
-
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -12,8 +10,6 @@ import {
   ExclamationTriangleIcon, PersonIcon, CalendarIcon, ReloadIcon,
   MagnifyingGlassIcon, PaperPlaneIcon, DotsHorizontalIcon
 } from '@radix-ui/react-icons';
-
-const API_BASE = '/api/tickets';
 
 const statusConfig = {
   open: { color: 'amber', icon: ClockIcon, label: 'Open' },
@@ -54,7 +50,7 @@ const Tickets = () => {
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (priorityFilter !== 'all') params.append('priority', priorityFilter);
       
-      const response = await fetch(`${API_BASE}?${params}`, {
+      const response = await fetch(`/api/tickets?${params}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -70,7 +66,7 @@ const Tickets = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch(`${API_BASE}/stats/overview`, {
+      const response = await fetch('/api/tickets/stats/overview', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -86,7 +82,7 @@ const Tickets = () => {
     if (!selectedTicket || !replyText.trim()) return;
     
     try {
-      const response = await fetch(`${API_BASE}/${selectedTicket._id}/reply`, {
+      const response = await fetch(`/api/tickets/${selectedTicket._id}/reply`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -98,7 +94,17 @@ const Tickets = () => {
       if (response.ok) {
         setReplyText('');
         fetchTickets();
-        alert('Reply sent!');
+        
+        if (selectedTicket.messages) {
+          setSelectedTicket({
+            ...selectedTicket,
+            messages: [...selectedTicket.messages, {
+              sender_type: 'admin',
+              message: replyText,
+              timestamp: new Date().toISOString()
+            }]
+          });
+        }
       }
     } catch (error) {
       console.error('Error sending reply:', error);
@@ -107,7 +113,7 @@ const Tickets = () => {
 
   const updateStatus = async (ticketId, newStatus) => {
     try {
-      const response = await fetch(`${API_BASE}/${ticketId}/status`, {
+      const response = await fetch(`/api/tickets/${ticketId}/status`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -118,6 +124,9 @@ const Tickets = () => {
       
       if (response.ok) {
         fetchTickets();
+        if (selectedTicket && selectedTicket._id === ticketId) {
+          setSelectedTicket({...selectedTicket, status: newStatus});
+        }
       }
     } catch (error) {
       console.error('Error updating status:', error);
@@ -151,23 +160,23 @@ const Tickets = () => {
         <Grid columns="5" gap="4" mb="6">
           <Card>
             <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Total</Text>
-            <Text size="6" weight="bold">{stats.total}</Text>
+            <Text size="6" weight="bold">{stats.total || 0}</Text>
           </Card>
           <Card>
             <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Open</Text>
-            <Text size="6" weight="bold" style={{ color: '#f59e0b' }}>{stats.open}</Text>
+            <Text size="6" weight="bold" style={{ color: '#f59e0b' }}>{stats.open || 0}</Text>
           </Card>
           <Card>
             <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>In Progress</Text>
-            <Text size="6" weight="bold" style={{ color: '#3b82f6' }}>{stats.in_progress}</Text>
+            <Text size="6" weight="bold" style={{ color: '#3b82f6' }}>{stats.in_progress || 0}</Text>
           </Card>
           <Card>
             <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Resolved</Text>
-            <Text size="6" weight="bold" style={{ color: '#10b981' }}>{stats.resolved}</Text>
+            <Text size="6" weight="bold" style={{ color: '#10b981' }}>{stats.resolved || 0}</Text>
           </Card>
           <Card>
-            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Today</Text>
-            <Text size="6" weight="bold">{stats.today}</Text>
+            <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Avg Resolution</Text>
+            <Text size="6" weight="bold">{stats.avg_resolution_hours ? `${stats.avg_resolution_hours}h` : 'N/A'}</Text>
           </Card>
         </Grid>
       )}
@@ -216,92 +225,102 @@ const Tickets = () => {
       </Card>
 
       <Card>
-        <Table.Root>
-          <Table.Header>
-            <Table.Row>
-              <Table.ColumnHeaderCell>Ticket #</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>User</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Subject</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Category</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Priority</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Created</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Actions</Table.ColumnHeaderCell>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {filteredTickets.map((ticket) => {
-              const StatusIcon = statusConfig[ticket.status]?.icon || ClockIcon;
-              
-              return (
-                <Table.Row key={ticket._id}>
-                  <Table.Cell>
-                    <Text size="2" weight="medium">{ticket.ticket_number}</Text>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Flex align="center" gap="2">
-                      <Avatar size="1" fallback={ticket.username?.slice(0, 2)} />
-                      <Text size="2">@{ticket.username}</Text>
-                    </Flex>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Text size="2">{ticket.subject}</Text>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Badge>{ticket.category}</Badge>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Badge color={priorityConfig[ticket.priority]?.color}>
-                      {priorityConfig[ticket.priority]?.label}
-                    </Badge>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Badge color={statusConfig[ticket.status]?.color}>
-                      <StatusIcon width="14" height="14" />
-                      {statusConfig[ticket.status]?.label}
-                    </Badge>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Text size="1">
-                      {new Date(ticket.created_at).toLocaleDateString()}
-                    </Text>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Flex gap="2">
-                      <IconButton
-                        size="1"
-                        variant="soft"
-                        onClick={() => {
-                          setSelectedTicket(ticket);
-                          setModalOpen(true);
-                        }}
-                      >
-                        <ChatBubbleIcon />
-                      </IconButton>
-                      <DropdownMenu.Root>
-                        <DropdownMenu.Trigger>
-                          <IconButton size="1" variant="ghost">
-                            <DotsHorizontalIcon />
-                          </IconButton>
-                        </DropdownMenu.Trigger>
-                        <DropdownMenu.Content>
-                          {Object.entries(statusConfig).map(([value, config]) => (
-                            <DropdownMenu.Item
-                              key={value}
-                              onClick={() => updateStatus(ticket._id, value)}
-                            >
-                              Set as {config.label}
-                            </DropdownMenu.Item>
-                          ))}
-                        </DropdownMenu.Content>
-                      </DropdownMenu.Root>
-                    </Flex>
-                  </Table.Cell>
-                </Table.Row>
-              );
-            })}
-          </Table.Body>
-        </Table.Root>
+        {loading ? (
+          <Box p="5">
+            <Text>Loading tickets...</Text>
+          </Box>
+        ) : filteredTickets.length === 0 ? (
+          <Box p="5">
+            <Text>No tickets found</Text>
+          </Box>
+        ) : (
+          <Table.Root>
+            <Table.Header>
+              <Table.Row>
+                <Table.ColumnHeaderCell>Ticket #</Table.ColumnHeaderCell>
+                <Table.ColumnHeaderCell>User</Table.ColumnHeaderCell>
+                <Table.ColumnHeaderCell>Subject</Table.ColumnHeaderCell>
+                <Table.ColumnHeaderCell>Category</Table.ColumnHeaderCell>
+                <Table.ColumnHeaderCell>Priority</Table.ColumnHeaderCell>
+                <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
+                <Table.ColumnHeaderCell>Created</Table.ColumnHeaderCell>
+                <Table.ColumnHeaderCell>Actions</Table.ColumnHeaderCell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {filteredTickets.map((ticket) => {
+                const StatusIcon = statusConfig[ticket.status]?.icon || ClockIcon;
+                
+                return (
+                  <Table.Row key={ticket._id}>
+                    <Table.Cell>
+                      <Text size="2" weight="medium">{ticket.ticket_number}</Text>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Flex align="center" gap="2">
+                        <Avatar size="1" fallback={ticket.username?.slice(0, 2) || '?'} />
+                        <Text size="2">@{ticket.username || 'Unknown'}</Text>
+                      </Flex>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Text size="2">{ticket.subject || 'No subject'}</Text>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Badge>{ticket.category || 'other'}</Badge>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Badge color={priorityConfig[ticket.priority]?.color || 'gray'}>
+                        {priorityConfig[ticket.priority]?.label || ticket.priority}
+                      </Badge>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Badge color={statusConfig[ticket.status]?.color || 'gray'}>
+                        <StatusIcon width="14" height="14" />
+                        {statusConfig[ticket.status]?.label || ticket.status}
+                      </Badge>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Text size="1">
+                        {new Date(ticket.created_at).toLocaleDateString()}
+                      </Text>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Flex gap="2">
+                        <IconButton
+                          size="1"
+                          variant="soft"
+                          onClick={() => {
+                            setSelectedTicket(ticket);
+                            setModalOpen(true);
+                          }}
+                        >
+                          <ChatBubbleIcon />
+                        </IconButton>
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger>
+                            <IconButton size="1" variant="ghost">
+                              <DotsHorizontalIcon />
+                            </IconButton>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Content>
+                            {Object.entries(statusConfig).map(([value, config]) => (
+                              <DropdownMenu.Item
+                                key={value}
+                                onClick={() => updateStatus(ticket._id, value)}
+                              >
+                                Set as {config.label}
+                              </DropdownMenu.Item>
+                            ))}
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Root>
+                      </Flex>
+                    </Table.Cell>
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </Table.Root>
+        )}
       </Card>
 
       <Dialog.Root open={modalOpen} onOpenChange={setModalOpen}>
@@ -310,9 +329,32 @@ const Tickets = () => {
             Ticket {selectedTicket?.ticket_number}
           </Dialog.Title>
           <Dialog.Description>
-            <ScrollArea style={{ height: '400px' }}>
+            <Box mb="3">
+              <Flex gap="3" align="center">
+                <Text size="2" weight="bold">User:</Text>
+                <Text size="2">@{selectedTicket?.username} ({selectedTicket?.telegram_id})</Text>
+              </Flex>
+              <Flex gap="3" align="center" mt="2">
+                <Text size="2" weight="bold">Category:</Text>
+                <Badge>{selectedTicket?.category || 'other'}</Badge>
+              </Flex>
+              <Flex gap="3" align="center" mt="2">
+                <Text size="2" weight="bold">Priority:</Text>
+                <Badge color={priorityConfig[selectedTicket?.priority]?.color}>
+                  {priorityConfig[selectedTicket?.priority]?.label || selectedTicket?.priority}
+                </Badge>
+              </Flex>
+            </Box>
+            
+            <ScrollArea style={{ height: '300px', marginBottom: '16px' }}>
               {selectedTicket?.messages?.map((msg, idx) => (
-                <Box key={idx} mb="3">
+                <Box key={idx} mb="3" style={{
+                  padding: '12px',
+                  borderRadius: '8px',
+                  background: msg.sender_type === 'customer' 
+                    ? 'var(--blue-3)' 
+                    : 'var(--green-3)'
+                }}>
                   <Flex align="center" gap="2" mb="1">
                     <Text size="2" weight="bold">
                       {msg.sender_type === 'customer' ? selectedTicket.username : 'Admin'}
@@ -323,7 +365,13 @@ const Tickets = () => {
                   </Flex>
                   <Text size="2">{msg.message}</Text>
                 </Box>
-              ))}
+              )) || (
+                <Box p="3">
+                  <Text size="2" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+                    {selectedTicket?.description || 'No messages yet'}
+                  </Text>
+                </Box>
+              )}
             </ScrollArea>
             
             <Box mt="4">
@@ -333,14 +381,18 @@ const Tickets = () => {
                 onChange={(e) => setReplyText(e.target.value)}
                 style={{ minHeight: '100px' }}
               />
-              <Flex gap="3" mt="3">
+              <Flex gap="3" mt="3" justify="between">
                 <Button onClick={sendReply} disabled={!replyText.trim()}>
                   <PaperPlaneIcon />
                   Send Reply
                 </Button>
                 <Select.Root
                   value={selectedTicket?.status}
-                  onValueChange={(value) => updateStatus(selectedTicket._id, value)}
+                  onValueChange={(value) => {
+                    if (selectedTicket) {
+                      updateStatus(selectedTicket._id, value);
+                    }
+                  }}
                 >
                   <Select.Trigger>
                     <Text>Status: {selectedTicket?.status}</Text>
