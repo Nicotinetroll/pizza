@@ -223,14 +223,124 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     state = user_ticket_state.get(user_id)
     
-    if state == ENTERING_SUBJECT:
-        return await handle_subject_input(update, context)
-    elif state == ENTERING_DESCRIPTION:
-        return await handle_description_input(update, context)
-    elif state == REPLYING_TO_TICKET:
-        return await process_ticket_reply(update, context)
+    logger.info(f"Handling text message for user {user_id} in state {state}")
     
-    return ConversationHandler.END
+    if state == ENTERING_SUBJECT:
+        user = update.effective_user
+        subject = update.message.text
+        
+        if len(subject) < 5:
+            await update.message.reply_text("❌ Subject too short. Please enter at least 5 characters.")
+            return
+        
+        user_ticket_context[user_id]["subject"] = subject
+        user_ticket_state[user_id] = ENTERING_DESCRIPTION
+        
+        await update.message.reply_text(
+            "📝 *Describe your issue in detail:*\n\n"
+            "Include any relevant order numbers or details.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+    elif state == ENTERING_DESCRIPTION:
+        user = update.effective_user
+        description = update.message.text
+        
+        logger.info(f"Creating ticket for user {user_id}")
+        
+        if len(description) < 10:
+            await update.message.reply_text("❌ Description too short. Please provide more details.")
+            return
+        
+        ticket_data = user_ticket_context.get(user_id, {})
+        
+        order_number = None
+        for word in description.split():
+            if word.startswith("APZ-") or word.startswith("ORD-"):
+                order_number = word
+                break
+        
+        priority = TicketPriority.HIGH if "urgent" in description.lower() else TicketPriority.MEDIUM
+        
+        try:
+            ticket = await create_support_ticket(
+                telegram_id=user.id,
+                username=user.username or f"user{user.id}",
+                category=ticket_data.get("category", "other"),
+                subject=ticket_data.get("subject", "No subject"),
+                description=description,
+                order_number=order_number,
+                priority=priority,
+                first_name=user.first_name,
+                last_name=user.last_name
+            )
+            
+            logger.info(f"Ticket created: {ticket['ticket_number']}")
+            
+            if ticket:
+                keyboard = [
+                    [InlineKeyboardButton("📋 View My Tickets", callback_data="my_tickets")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="home")]
+                ]
+                
+                await update.message.reply_text(
+                    f"✅ *Ticket Created Successfully!*\n\n"
+                    f"Ticket ID: `{ticket['ticket_number']}`\n"
+                    f"Status: 🟡 Open\n\n"
+                    f"We'll respond within 2-4 hours.\n"
+                    f"You'll be notified when admin replies.",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                logger.error("Ticket creation returned None!")
+                await update.message.reply_text("❌ Failed to create ticket. Please try again.")
+                
+        except Exception as e:
+            logger.error(f"Error creating ticket: {e}")
+            import traceback
+            traceback.print_exc()
+            await update.message.reply_text("❌ An error occurred while creating the ticket. Please try again.")
+        
+        user_ticket_context.pop(user_id, None)
+        user_ticket_state.pop(user_id, None)
+        
+    elif state == REPLYING_TO_TICKET:
+        user = update.effective_user
+        message = update.message.text
+        ticket_number = context.user_data.get("replying_to_ticket")
+        
+        if not ticket_number:
+            await update.message.reply_text("❌ Error: No ticket selected.")
+            user_ticket_state.pop(user_id, None)
+            return
+        
+        ticket = await get_ticket_by_number(ticket_number)
+        if not ticket:
+            await update.message.reply_text("❌ Ticket not found.")
+            user_ticket_state.pop(user_id, None)
+            return
+        
+        success = await add_ticket_message(
+            ticket["_id"],
+            user.id,
+            "customer",
+            message
+        )
+        
+        if success:
+            keyboard = [[InlineKeyboardButton("📋 View Ticket", callback_data=f"view_ticket_{ticket_number}")]]
+            
+            await update.message.reply_text(
+                f"✅ Reply added to ticket {ticket_number}",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await update.message.reply_text("❌ Failed to add reply.")
+        
+        context.user_data.pop("replying_to_ticket", None)
+        user_ticket_state.pop(user_id, None)
 
 async def show_user_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
