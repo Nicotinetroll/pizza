@@ -393,4 +393,4 @@ const Tickets = () => {
   );
 };
 
-export default Tickets;ß
+export default Tickets;
