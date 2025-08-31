@@ -1057,60 +1057,43 @@ export const payoutsAPI = {
 
 export const ticketsAPI = {
   getAll: async (params = {}) => {
-    const queryString = new URLSearchParams(params).toString();
-    const response = await api.get(`/tickets${queryString ? `?${queryString}` : ''}`);
+    const query = new URLSearchParams(params).toString();
+    const response = await api.get(`/tickets${query ? `?${query}` : ''}`);
     return response.data;
   },
-
-  getById: async (ticketId) => {
-    if (!ticketId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid ticket ID');
-    }
-    const response = await api.get(`/tickets/${ticketId}`);
+  
+  getById: async (id) => {
+    const response = await api.get(`/tickets/${id}`);
     return response.data;
   },
-
+  
   reply: async (ticketId, data) => {
-    if (!ticketId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid ticket ID');
-    }
-    if (!data.message || data.message.trim().length === 0) {
-      throw new Error('Message cannot be empty');
-    }
     const response = await api.post(`/tickets/${ticketId}/reply`, data);
     return response.data;
   },
-
+  
   updateStatus: async (ticketId, data) => {
-    if (!ticketId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid ticket ID');
-    }
-    const validStatuses = ['open', 'in_progress', 'waiting_customer', 'waiting_admin', 'resolved', 'closed'];
-    if (!validStatuses.includes(data.status)) {
-      throw new Error('Invalid status');
-    }
     const response = await api.patch(`/tickets/${ticketId}/status`, data);
     return response.data;
   },
-
+  
   assign: async (ticketId, data) => {
-    if (!ticketId.match(/^[0-9a-fA-F]{24}$/)) {
-      throw new Error('Invalid ticket ID');
-    }
     const response = await api.post(`/tickets/${ticketId}/assign`, data);
     return response.data;
   },
-
+  
   getStats: async () => {
     const response = await api.get('/tickets/stats/overview');
     return response.data;
   },
-
-  search: async (query, limit = 50) => {
-    if (!query || query.trim().length === 0) {
-      throw new Error('Search query required');
-    }
-    const response = await api.post('/tickets/search', { query, limit });
+  
+  search: async (query) => {
+    const response = await api.post('/tickets/search', { query });
+    return response.data;
+  },
+  
+  delete: async (ticketId) => {
+    const response = await api.delete(`/tickets/${ticketId}`);
     return response.data;
   }
 };

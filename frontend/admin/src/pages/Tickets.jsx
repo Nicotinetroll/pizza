@@ -3,12 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Box, Flex, Grid, Text, Card, Badge, Button, TextField,
   Table, IconButton, Heading, TextArea, Dialog, Select,
-  Tabs, Avatar, ScrollArea, DropdownMenu
+  Tabs, Avatar, ScrollArea, DropdownMenu, Separator
 } from '@radix-ui/themes';
 import {
   ChatBubbleIcon, ClockIcon, CheckCircledIcon, CrossCircledIcon,
   ExclamationTriangleIcon, PersonIcon, CalendarIcon, ReloadIcon,
-  MagnifyingGlassIcon, PaperPlaneIcon, DotsHorizontalIcon
+  MagnifyingGlassIcon, PaperPlaneIcon, DotsHorizontalIcon, TrashIcon
 } from '@radix-ui/react-icons';
 import { ticketsAPI } from '../services/api';
 
@@ -104,6 +104,25 @@ const Tickets = () => {
       }
     } catch (error) {
       console.error('Error updating status:', error);
+    }
+  };
+
+  const deleteTicket = async (ticketId) => {
+    if (!window.confirm('Are you sure you want to delete this ticket?')) {
+      return;
+    }
+    
+    try {
+      await ticketsAPI.delete(ticketId);
+      fetchTickets();
+      
+      if (selectedTicket && selectedTicket._id === ticketId) {
+        setSelectedTicket(null);
+        setModalOpen(false);
+      }
+    } catch (error) {
+      console.error('Error deleting ticket:', error);
+      alert('Failed to delete ticket');
     }
   };
 
@@ -285,6 +304,14 @@ const Tickets = () => {
                                 Set as {config.label}
                               </DropdownMenu.Item>
                             ))}
+                            <DropdownMenu.Separator />
+                            <DropdownMenu.Item
+                              onClick={() => deleteTicket(ticket._id)}
+                              style={{ color: 'var(--red-9)' }}
+                            >
+                              <TrashIcon />
+                              Delete Ticket
+                            </DropdownMenu.Item>
                           </DropdownMenu.Content>
                         </DropdownMenu.Root>
                       </Flex>
@@ -362,10 +389,22 @@ const Tickets = () => {
               style={{ minHeight: '100px' }}
             />
             <Flex gap="3" mt="3" justify="between">
-              <Button onClick={sendReply} disabled={!replyText.trim()}>
-                <PaperPlaneIcon />
-                Send Reply
-              </Button>
+              <Flex gap="2">
+                <Button onClick={sendReply} disabled={!replyText.trim()}>
+                  <PaperPlaneIcon />
+                  Send Reply
+                </Button>
+                <Button 
+                  color="red" 
+                  variant="soft"
+                  onClick={() => {
+                    deleteTicket(selectedTicket._id);
+                  }}
+                >
+                  <TrashIcon />
+                  Delete Ticket
+                </Button>
+              </Flex>
               <Select.Root
                 value={selectedTicket?.status}
                 onValueChange={(value) => {

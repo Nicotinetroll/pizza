@@ -223,3 +223,26 @@ async def search_tickets(
         return {"tickets": tickets}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router_tickets.delete("/{ticket_id}")
+async def delete_ticket(
+    ticket_id: str,
+    email: str = Depends(verify_token)
+):
+    try:
+        from bson import ObjectId
+        
+        try:
+            result = await db.support_tickets.delete_one({"_id": ObjectId(ticket_id)})
+        except:
+            result = await db.support_tickets.delete_one({"ticket_number": ticket_id})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        
+        return {"success": True, "message": "Ticket deleted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
