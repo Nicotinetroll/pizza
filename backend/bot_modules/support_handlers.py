@@ -561,6 +561,6 @@ def get_support_conversation_handler():
             ENTERING_SUBJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_subject_input)],
             ENTERING_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_description_input)],
             REPLYING_TO_TICKET: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_ticket_reply)]
-        ],
+        },
         fallbacks=[CommandHandler('cancel', lambda u, c: ConversationHandler.END)]
     )
