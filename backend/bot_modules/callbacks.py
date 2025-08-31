@@ -110,13 +110,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from .support_handlers import show_support_menu
         await show_support_menu(update, context)
     
+    elif data.startswith("ticket_cat_"):
+        from .support_handlers import handle_category_selection_callback
+        await handle_category_selection_callback(update, context)
+    
     elif data == "support":
         support_text = """
 💬 *NEED HELP?*
 
 *Contact Support:*
-📧 Email: support@anabolicpizza.eu
-💬 Telegram: @APizzaSupport
+📧 Email: anbpizza@proton.me
+💬 Telegram: @mangoinsatan
 
 *Response Time:*
 - Orders/Payment: 1-2 hours

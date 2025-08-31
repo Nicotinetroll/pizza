@@ -12,10 +12,13 @@ logger = logging.getLogger(__name__)
 SELECTING_CATEGORY, ENTERING_SUBJECT, ENTERING_DESCRIPTION, REPLYING_TO_TICKET = range(4)
 
 user_ticket_context = {}
+user_ticket_state = {}
 
 async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = update.effective_user
+    
+    user_ticket_state[user.id] = SELECTING_CATEGORY
     
     keyboard = [
         [
@@ -43,10 +46,37 @@ async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
-    return SELECTING_CATEGORY
+
+async def handle_category_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    
+    if query.data == "my_tickets":
+        await show_user_tickets(update, context)
+        user_ticket_state.pop(user_id, None)
+        return
+    
+    if query.data == "home":
+        from .handlers import start_command
+        await start_command(update, context)
+        user_ticket_state.pop(user_id, None)
+        return
+    
+    category = query.data.replace("ticket_cat_", "")
+    user_ticket_context[user_id] = {"category": category}
+    user_ticket_state[user_id] = ENTERING_SUBJECT
+    
+    await query.edit_message_text(
+        f"📝 *Creating Ticket - {category.upper()}*\n\n"
+        "Please enter a brief subject for your ticket:",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    user_ticket_state[user.id] = SELECTING_CATEGORY
     
     keyboard = [
         [
@@ -115,6 +145,7 @@ async def handle_subject_input(update: Update, context: ContextTypes.DEFAULT_TYP
         return ENTERING_SUBJECT
     
     user_ticket_context[user_id]["subject"] = subject
+    user_ticket_state[user_id] = ENTERING_DESCRIPTION
     
     await update.message.reply_text(
         "📝 *Describe your issue in detail:*\n\n"
@@ -185,6 +216,20 @@ async def handle_description_input(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("❌ An error occurred while creating the ticket. Please try again.")
     
     user_ticket_context.pop(user.id, None)
+    user_ticket_state.pop(user.id, None)
+    return ConversationHandler.END
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    state = user_ticket_state.get(user_id)
+    
+    if state == ENTERING_SUBJECT:
+        return await handle_subject_input(update, context)
+    elif state == ENTERING_DESCRIPTION:
+        return await handle_description_input(update, context)
+    elif state == REPLYING_TO_TICKET:
+        return await process_ticket_reply(update, context)
+    
     return ConversationHandler.END
 
 async def show_user_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -294,9 +339,12 @@ async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     
+    user_id = update.effective_user.id
+    
     if query.data.startswith("reply_ticket_"):
         ticket_number = query.data.replace("reply_ticket_", "")
         context.user_data["replying_to_ticket"] = ticket_number
+        user_ticket_state[user_id] = REPLYING_TO_TICKET
         
         await query.edit_message_text(
             f"💬 *Reply to Ticket {ticket_number}*\n\n"
@@ -352,6 +400,7 @@ async def process_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ Failed to add reply.")
     
     context.user_data.pop("replying_to_ticket", None)
+    user_ticket_state.pop(user.id, None)
     return ConversationHandler.END
 
 async def mytickets_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -402,6 +451,6 @@ def get_support_conversation_handler():
             ENTERING_SUBJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_subject_input)],
             ENTERING_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_description_input)],
             REPLYING_TO_TICKET: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_ticket_reply)]
-        },
+        ],
         fallbacks=[CommandHandler('cancel', lambda u, c: ConversationHandler.END)]
     )
