@@ -222,7 +222,9 @@ const ChartSection = ({ analytics, timeRange, isMobile }) => {
                               background: COLORS[idx % COLORS.length]
                             }} />
                             <Box>
-                              <Text size="2" weight="medium">{cat.emoji} {cat.name}</Text>
+                              <Flex align="center" gap="1">
+                                <Text size="2" weight="medium">{cat.emoji} {cat.name}</Text>
+                              </Flex>
                               <Text size="1" style={{ color: 'rgba(255, 255, 255, 0.5)' }}>
                                 {percentage.toFixed(1)}% of total
                               </Text>
@@ -244,7 +246,7 @@ const ChartSection = ({ analytics, timeRange, isMobile }) => {
                             transition={{ duration: 0.8, delay: idx * 0.1 }}
                             style={{
                               height: '100%',
-                              background: `linear-gradient(90deg, ${COLORS[idx % COLORS.length]}40, ${COLORS[idx % COLORS.length]})`,
+                              background: COLORS[idx % COLORS.length],
                               borderRadius: '2px'
                             }}
                           />
