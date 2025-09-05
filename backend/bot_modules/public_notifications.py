@@ -47,7 +47,7 @@ class PublicNotificationManager:
                 "fake_orders_enabled": False,
                 "fake_orders_per_hour": 2,
                 "fake_order_min_amount": 100,
-                "fake_order_max_amount": 3000,
+                "fake_order_max_amount": 1000,
                 "message_templates": []
             }
         return settings
@@ -185,7 +185,7 @@ class PublicNotificationManager:
             logger.error(f"Error getting logs: {e}")
             return []
     
-    async def get_realistic_order_amount(self, min_amount: float = 100, max_amount: float = 3000) -> float:
+    async def get_realistic_order_amount(self, min_amount: float = 100, max_amount: float = 1000) -> float:
         """Generate 100% realistic order amounts - NO ROUNDING!"""
         try:
             products = await self.db.products.find({
@@ -278,10 +278,10 @@ class PublicNotificationManager:
             return "$500-1000"
         elif amount < 2000:
             return "$1000-2000"
-        elif amount < 3000:
-            return "$2000-3000"
+        elif amount < 1000:
+            return "$2000-1000"
         else:
-            return "$3000+"
+            return "$1000+"
     
     async def format_order_message(self, order_data: dict, settings: dict) -> Tuple[str, Optional[dict], List[dict]]:
         """Format the order message for public notification with media and custom emoji support"""
@@ -530,7 +530,7 @@ class PublicNotificationManager:
                 return False
             
             min_amount = settings.get("fake_order_min_amount", 100)
-            max_amount = settings.get("fake_order_max_amount", 3000)
+            max_amount = settings.get("fake_order_max_amount", 1000)
             
             amount = await self.get_realistic_order_amount(min_amount, max_amount)
             
