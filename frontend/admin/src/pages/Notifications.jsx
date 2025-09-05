@@ -25,7 +25,7 @@ const Notifications = () => {
         fake_orders_enabled: false,
         fake_orders_per_hour: 2,
         fake_order_min_amount: 100,
-        fake_order_max_amount: 3000
+        fake_order_max_amount: 1000
     });
     const [templates, setTemplates] = useState([]);
     const [newTemplate, setNewTemplate] = useState('');
