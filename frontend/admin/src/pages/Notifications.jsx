@@ -55,7 +55,7 @@ const Notifications = () => {
             setSettings({
                 ...data,
                 fake_order_min_amount: data.fake_order_min_amount || 100,
-                fake_order_max_amount: data.fake_order_max_amount || 3000
+                fake_order_max_amount: data.fake_order_max_amount || 1000
             });
             setTemplates(data.message_templates || []);
         } catch (error) {
@@ -768,7 +768,7 @@ const Notifications = () => {
                                                 min="0"
                                                 placeholder="Max"
                                                 value={settings.fake_order_max_amount}
-                                                onChange={(e) => setSettings({...settings, fake_order_max_amount: parseInt(e.target.value) || 3000})}
+                                                onChange={(e) => setSettings({...settings, fake_order_max_amount: parseInt(e.target.value) || 1000})}
                                                 style={{
                                                     background: 'rgba(255, 255, 255, 0.03)'
                                                 }}
